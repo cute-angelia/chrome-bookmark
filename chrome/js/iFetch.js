@@ -1,5 +1,5 @@
 import {
-  getExtensionConfig
+  getExtensionConfig, notify
 } from "./helper";
 
 class iFetch {
@@ -83,6 +83,7 @@ class iFetch {
           })
           .catch((error) => {
             console.log("Network response was not ok 3", error);
+            notify("通知", "服务异常，无法访问服务:" + baseUrl)
             return reject(error)
           });
 

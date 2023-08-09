@@ -12,12 +12,13 @@ async function getPageContent(tab) {
   }
 }
 
-async function openLibraries() {
-  var config = await getExtensionConfig();
-  return chrome.tabs.create({
-    active: true,
-    url: config.server,
-  });
+function openLibraries() {
+  getExtensionConfig().then(config => {
+    return chrome.tabs.create({
+      active: true,
+      url: config.server,
+    });
+  })
 }
 
 function removeBookmark() {

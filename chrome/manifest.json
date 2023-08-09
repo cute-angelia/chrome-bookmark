@@ -15,7 +15,8 @@
     "tabs",
     "storage",
     "tabCapture",
-    "bookmarks"
+    "bookmarks",
+    "notifications"
   ],
 
   "background": {

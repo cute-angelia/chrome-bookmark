@@ -155,3 +155,27 @@ export function removeLocalBookmark(url) {
     })
   });
 }
+
+export function notify(title, message) {
+  try {
+    var icon = "/icons/icon.png";
+    var isClosed = false;
+    var notificationId = "posting_" + Math.random();
+
+    chrome.notifications.create(
+      notificationId, {
+      type: "basic",
+      title: title,
+      message: message,
+      iconUrl: icon,
+    },
+      function (nId) { }
+    );
+    setTimeout(function () {
+      if (!isClosed)
+        chrome.notifications.clear(notificationId, function (wasCleared) { });
+    }, 5000);
+  } catch (e) {
+    alert(e.message);
+  }
+}
