@@ -1,4 +1,4 @@
-import { getExtensionConfig, getCurrentTab, openOptionsPage } from "./helper.js";
+import { getExtensionConfig, getCurrentTab, openOptionsPage, getShioriBookmarkFolder, saveLocalBookmark, removeLocalBookmark, findLocalBookmark } from "./helper.js";
 import ifetch from "./iFetch.js"
 
 async function getPageContent(tab) {
@@ -12,93 +12,7 @@ async function getPageContent(tab) {
   }
 }
 
-async function getShioriBookmarkFolder() {
-  // TODO:
-  // I'm not sure it's the most efficient way, but it's the simplest.
-  // We want to put Shiori folder in `Other bookmarks`, which id different depending on chrome.
-  // In Firefox, its id is `unfiled_____` while in Chrome the id is `2`.
-  var parentId = "",
-    runtimeUrl = await chrome.runtime.getURL("/");
-
-  if (runtimeUrl.startsWith("moz")) {
-    parentId = "unfiled_____";
-  } else if (runtimeUrl.startsWith("chrome")) {
-    parentId = "2";
-  } else {
-    throw new Error("right now extension only support firefox and chrome")
-  }
-
-  // Check if the parent folder already has Shiori folder
-  var children = await chrome.bookmarks.getChildren(parentId),
-    shiori = children.find(el => el.url == null && el.title === "Shiori");
-
-  if (!shiori) {
-    shiori = await chrome.bookmarks.create({
-      title: "Shiori",
-      parentId: parentId
-    });
-  }
-
-  return shiori;
-}
-
-async function findLocalBookmark(url) {
-  var shioriFolder = await getShioriBookmarkFolder(),
-    existingBookmarks = await chrome.bookmarks.search({
-      url: url,
-    });
-
-  var idx = existingBookmarks.findIndex(book => {
-    return book.parentId === shioriFolder.id;
-  });
-
-
-
-  if (idx >= 0) {
-    return existingBookmarks[idx];
-  } else {
-    return null;
-  }
-}
-
-async function saveLocalBookmark(url, title) {
-  var shioriFolder = await getShioriBookmarkFolder(),
-    existingBookmarks = await chrome.bookmarks.search({
-      url: url,
-    });
-
-  var idx = existingBookmarks.findIndex(book => {
-    return book.parentId === shioriFolder.id;
-  });
-
-  if (idx === -1) {
-    await chrome.bookmarks.create({
-      url: url,
-      title: title,
-      parentId: shioriFolder.id,
-    });
-  }
-
-  return Promise.resolve();
-}
-
-async function removeLocalBookmark(url) {
-  var shioriFolder = await getShioriBookmarkFolder(),
-    existingBookmarks = await chrome.bookmarks.search({
-      url: url,
-    });
-
-  existingBookmarks.forEach(book => {
-    if (book.parentId !== shioriFolder.id) return;
-    chrome.bookmarks.remove(book.id);
-  });
-
-  return Promise.resolve();
-}
-
-
 async function openLibraries() {
-  console.log("openLibraries");
   var config = await getExtensionConfig();
   return chrome.tabs.create({
     active: true,
@@ -106,59 +20,17 @@ async function openLibraries() {
   });
 }
 
-async function removeBookmark() {
-  var tab = await getCurrentTab(),
-    config = await getExtensionConfig();
-
-  // Create API URL
-  var apiURL = "";
-  try {
-    var api = new URL(config.server);
-    if (api.pathname.slice(-1) == "/") {
-      api.pathname = api.pathname + "api/bookmarks/ext";
-    } else {
-      api.pathname = api.pathname + "/api/bookmarks/ext";
-    }
-    apiURL = api.toString();
-  } catch (err) {
-    throw new Error(`${config.server} is not a valid url`);
-  }
-
-  // Send request via background script
-  var response = await fetch(apiURL, {
-    method: "delete",
-    body: JSON.stringify({
-      url: tab.url
-    }),
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${config.token}`,
-    }
-  });
-
-  if (!response.ok) {
-    var err = await response.text();
-    throw new Error(err);
-  }
-
-  // Remove local bookmark
-  await removeLocalBookmark(tab.url);
-
-  return Promise.resolve();
-}
-
-function saveBookmark(tags) {
-  // Get value from async function
+function removeBookmark() {
   return new Promise(function (resolve, reject) {
     getCurrentTab().then(tab => {
-      ifetch.post("/api/bookmarks/add", {
+      ifetch.post("/api/bookmarks/deleteUrl", {
         url: tab.url,
-        title: tab.title,
-        tags: tags.join(","),
       }).then(data => {
         if (data.code != 0) {
           return reject(data.msg)
         } else {
+          // Remove local bookmark
+          removeLocalBookmark(tab.url);
           return resolve();
         }
       }).catch(err => {
@@ -169,17 +41,49 @@ function saveBookmark(tags) {
           return reject(err.toString())
         }
       })
-      // todo
-      // Save to local bookmark
-      // var pageTitle = content.title || tab.title;
-      // await saveLocalBookmark(tab.url, pageTitle);
+    })
+  })
+
+}
+
+function saveBookmark(tags) {
+  // Get value from async function
+  return new Promise(function (resolve, reject) {
+    getCurrentTab().then(tab => {
+      // 截图
+      // 捕获当前选项卡中可见区域的屏幕截图
+      chrome.tabs.captureVisibleTab(null, {}, function (dataUrl) {
+        ifetch.post("/api/bookmarks/add", {
+          url: tab.url,
+          title: tab.title,
+          from: "ext",
+          tags: tags.join(","),
+          imgbase64: dataUrl
+        }).then(data => {
+          if (data.code != 0) {
+            return reject(data.msg)
+          } else {
+            // Save to local bookmark
+            saveLocalBookmark(tab.url, tab.title);
+            return resolve();
+          }
+        }).catch(err => {
+          console.log(err.toString());
+          if (err.toString().includes("login")) {
+            openOptionsPage()
+          } else {
+            return reject(err.toString())
+          }
+        })
+      });
+
     })
   });
 }
 
-async function updateIcon() {
+function updateIcon() {
   // Set initial icon
-  var runtimeUrl = await chrome.runtime.getURL("/"),
+  var runtimeUrl = chrome.runtime.getURL("/"),
     icon = {
       path: {
         16: "icons/action-default-16.png",
@@ -195,18 +99,20 @@ async function updateIcon() {
   }
 
   // Get current active tab
-  try {
-    var tab = await getCurrentTab(),
-      local = await findLocalBookmark(tab.url);
 
-    if (local) icon.path = {
-      16: "icons/action-bookmarked-16.png",
-      32: "icons/action-bookmarked-32.png",
-      64: "icons/action-bookmarked-64.png"
-    }
-  } catch { }
+  getCurrentTab().then(tab => {
 
-  return chrome.browserAction.setIcon(icon);
+    findLocalBookmark(tab.url).then(local => {
+      if (local) icon.path = {
+        16: "icons/action-bookmarked-16.png",
+        32: "icons/action-bookmarked-32.png",
+        64: "icons/action-bookmarked-64.png"
+      }
+
+      return chrome.browserAction.setIcon(icon);
+    })
+
+  })
 }
 
 // Define event handler

@@ -41,17 +41,117 @@ export function getCurrentTab() {
         //if (!supportedProtocols.includes(url.protocol)) {
         // throw new Error(`Unsupported protocol "${url.protocol}"`);
         //}
-        resolve(activeTab);
+
+        console.log(activeTab)
+        if (activeTab == undefined) {
+          reject()
+        } else {
+          resolve(activeTab);
+        }
+
       });
     } catch (err) {
       reject(err);
     }
-
   });
 }
 
 export function openOptionsPage() {
   chrome.tabs.create({
     url: "/view/options.html"
+  });
+}
+
+export function getShioriBookmarkFolder() {
+  return new Promise((resolve) => {
+    // TODO:
+    // I'm not sure it's the most efficient way, but it's the simplest.
+    // We want to put Shiori folder in `Other bookmarks`, which id different depending on chrome.
+    // In Firefox, its id is `unfiled_____` while in Chrome the id is `2`.
+    var parentId = "",
+      runtimeUrl = chrome.runtime.getURL("/");
+
+    if (runtimeUrl.startsWith("moz")) {
+      parentId = "unfiled_____";
+    } else if (runtimeUrl.startsWith("chrome")) {
+      parentId = "2";
+    } else {
+      throw new Error("right now extension only support firefox and chrome")
+    }
+    // Check if the parent folder already has Shiori folder
+    chrome.bookmarks.getChildren(parentId, function (children) {
+      var shiori = children.find(el => el.url == null && el.title === "Shiori");
+      if (!shiori) {
+        chrome.bookmarks.create({
+          title: "Shiori",
+          parentId: parentId
+        }, shiori => {
+          return resolve(shiori)
+        });
+      } else {
+        return resolve(shiori)
+      }
+    });
+  })
+}
+
+export function findLocalBookmark(url) {
+  return new Promise((resolve) => {
+    getShioriBookmarkFolder().then(shioriFolder => {
+      chrome.bookmarks.search({
+        url: url,
+      }, existingBookmarks => {
+        var idx = existingBookmarks.findIndex(book => {
+          return book.parentId === shioriFolder.id;
+        });
+        if (idx >= 0) {
+          return resolve(existingBookmarks[idx]);
+        } else {
+          return resolve();
+        }
+      })
+    })
+
+  });
+}
+
+export function saveLocalBookmark(url, title) {
+  return new Promise((resolve) => {
+    getShioriBookmarkFolder().then(shioriFolder => {
+      chrome.bookmarks.search({
+        url: url,
+      }, existingBookmarks => {
+        var idx = existingBookmarks.findIndex(book => {
+          return book.parentId === shioriFolder.id;
+        });
+
+        if (idx === -1) {
+          chrome.bookmarks.create({
+            url: url,
+            title: title,
+            parentId: shioriFolder.id,
+          }, () => {
+            resolve();
+          });
+        }
+        resolve();
+      })
+    })
+  });
+}
+
+export function removeLocalBookmark(url) {
+  return new Promise((resolve) => {
+    getShioriBookmarkFolder().then(shioriFolder => {
+      chrome.bookmarks.search({
+        url: url,
+      }, existingBookmarks => {
+        existingBookmarks.forEach(book => {
+          if (book.parentId !== shioriFolder.id) return;
+          chrome.bookmarks.remove(book.id);
+        });
+        return resolve()
+      })
+    })
   });
 }

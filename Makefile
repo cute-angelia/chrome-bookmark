@@ -1,11 +1,8 @@
-build:
-	web-ext build -a dist
+.PHONY: up
 
-run-firefox:
-	web-ext run -t firefox-desktop
-
-run-chromium:
-	web-ext run -t chromium
-
-lint:
-	web-ext lint
+up:
+	git pull origin main
+	git add .
+	git commit -am "update"
+	git push origin master
+	@echo "\n 发布中..."

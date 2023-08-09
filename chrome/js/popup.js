@@ -61,9 +61,7 @@ btnSave.addEventListener("click", (e) => {
     .split(/\s*,\s*/g)
     .filter(tag => tag.trim() !== "")
     .map(tag => {
-      return {
-        name: tag.trim()
-      };
+      return tag.trim();
     });
 
   // Show loading indicator
