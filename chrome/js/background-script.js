@@ -13,12 +13,20 @@ async function getPageContent(tab) {
 }
 
 function openLibraries() {
-  getExtensionConfig().then(config => {
-    return chrome.tabs.create({
-      active: true,
-      url: config.server,
-    });
-  })
+  return new Promise(function (resolve, reject) {
+    getExtensionConfig().then(config => {
+      chrome.tabs.create({
+        active: true,
+        url: config.server,
+      });
+      resolve();
+    }).catch(err => {
+      if (err.toString().includes("login")) {
+        openOptionsPage()
+      }
+      reject(err)
+    })
+  });
 }
 
 function removeBookmark() {
@@ -35,7 +43,6 @@ function removeBookmark() {
           return resolve();
         }
       }).catch(err => {
-        console.log(err.toString());
         if (err.toString().includes("login")) {
           openOptionsPage()
         } else {
@@ -163,7 +170,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Add handler for icon change
 function updateActiveTab() {
-  updateIcon().catch(err => console.error(err.message));
+  updateIcon()
 }
 
 chrome.bookmarks.onCreated.addListener(updateActiveTab);
