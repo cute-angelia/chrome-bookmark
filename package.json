@@ -1,6 +1,6 @@
 {
-  "name": "shiori-web-ext",
-  "version": "1.6.0",
+  "name": "chrome-bookmark",
+  "version": "1.6.2",
   "private": true,
   "scripts": {
     "dev": "export NODE_ENV='development' && webpack --mode=development --watch",

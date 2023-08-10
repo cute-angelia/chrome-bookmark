@@ -4,7 +4,7 @@
   "name": "Bookmark",
   "author": "Bookmark Team",
   "description": "a simple bookmark manager.",
-  "homepage_url": "https://github.com/cute-angelia/shiori-web-ext",
+  "homepage_url": "https://github.com/cute-angelia/chrome-bookmark",
   "icons": {
     "48": "icons/icon-48.png",
     "96": "icons/icon-96.png"
@@ -43,7 +43,7 @@
 
   "browser_action": {
     "browser_style": true,
-    "default_title": "Shiori",
+    "default_title": "chrome-bookmark",
     "default_popup": "view/popup.html",
     "default_icon": {
       "16": "icons/action-default-16.png",
