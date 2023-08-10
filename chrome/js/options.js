@@ -109,9 +109,9 @@ getExtensionConfig()
     if (cfg.token === "") txtSession.textContent = "No active session";
     else txtSession.textContent = `Logged in success by` + cfg.username;
 
-    inputServer.value = cfg.server;
-    inputUsername.value = cfg.username;
-    inputPassword.value = cfg.password;
+    inputServer.value = cfg.server || "";
+    inputUsername.value = cfg.username || "";
+    inputPassword.value = cfg.password || "";
     // inputRemember.checked = cfg.remember;
   })
   .catch(err => showError(err));
