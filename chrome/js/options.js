@@ -1,4 +1,5 @@
 import { getExtensionConfig } from "./helper.js";
+import ifetch from "./iFetch.js"
 
 // async function getExtensionConfig() {
 //   var items = await chrome.storage.local.get();
@@ -12,70 +13,62 @@ import { getExtensionConfig } from "./helper.js";
 //   };
 // }
 
-async function saveExtensionConfig(cfg) {
-  return chrome.storage.local.set(cfg);
+function saveExtensionConfig(cfg) {
+  chrome.storage.local.set(cfg)
+  return
 }
 
 async function logout(server, token) {
   return Promise.resolve();
 }
 
-async function login(server, username, password, remember) {
-  // Validate input
-  if (server === "") {
-    throw new Error("Server must not empty");
-  }
-
-  if (username === "") {
-    throw new Error("Username must not empty");
-  }
-
-  if (password === "") {
-    throw new Error("Password must not empty");
-  }
-
-  if (typeof remember !== 'boolean') {
-    remember = false;
-  }
-
-  // Create login URL
-  var loginURL = "";
-  var loginPath = "api/auth/login";
-  try {
-    loginURL = new URL(server);
-    if (loginURL.pathname.slice(-1) == "/") {
-      loginURL.pathname = loginURL.pathname + loginPath;
-    } else {
-      loginURL.pathname = loginURL.pathname + "/" + loginPath;
+function login(server, username, password, remember) {
+  return new Promise((resolve, reject) => {
+    // Validate input
+    if (server === "") {
+      throw new Error("Server must not empty");
     }
-  } catch (err) {
-    throw new Error(`${server} is not a valid url`);
-  }
 
-  // Send login request
-  var response = await fetch(loginURL, {
-    method: "post",
-    body: JSON.stringify({
+    if (username === "") {
+      throw new Error("Username must not empty");
+    }
+
+    if (password === "") {
+      throw new Error("Password must not empty");
+    }
+
+    if (typeof remember !== 'boolean') {
+      remember = false;
+    }
+
+    // Create login URL
+    var loginURL = "";
+    var loginPath = "api/auth/login";
+    try {
+      loginURL = new URL(server);
+      if (loginURL.pathname.slice(-1) == "/") {
+        loginURL.pathname = loginURL.pathname + loginPath;
+      } else {
+        loginURL.pathname = loginURL.pathname + "/" + loginPath;
+      }
+    } catch (err) {
+      throw new Error(`${server} is not a valid url`);
+    }
+
+    ifetch.post(loginURL.href, {
       username: username,
       password: password,
       remember_me: remember,
-    }),
-    headers: {
-      "Content-Type": "application/json",
-    }
+    }).then(resp => {
+      if (resp.code != 0) {
+        return reject(resp.msg)
+      } else {
+        return resolve(resp.data.token);
+      }
+    }).catch(err => {
+      return reject(err.toString())
+    })
   });
-
-  if (!response.ok) {
-    var err = await response.text();
-    throw new Error(err);
-  }
-
-  var jsonResp = await response.json(),
-    token = jsonResp.data.token;
-
-  console.log(token);
-
-  return token;
 }
 
 // Define function for UI handler
@@ -110,6 +103,7 @@ function hideError() {
 
 getExtensionConfig()
   .then(cfg => {
+    console.log("cfg", cfg);
     config = cfg;
 
     if (cfg.token === "") txtSession.textContent = "No active session";
@@ -131,27 +125,27 @@ async function btnLoginClick() {
   // remember = inputRemember.checked;
 
   // Login using input value
-  var token = await login(server, username, password, true);
+  login(server, username, password, true).then(token => {
+    // Save input value and token to config
+    if (server.endsWith("/")) {
+      server = server.slice(0, -1);
+    }
 
-  // Save input value and token to config
+    config.server = server;
+    config.token = token;
+    config.username = username;
+    // config.password = password;
+    config.remember = true;
+    saveExtensionConfig(config);
+    txtSession.textContent = `Logged in.`;
 
-  if (server.endsWith("/")) {
-    server = server.slice(0, -1);
-  }
-
-  config.server = server;
-  config.token = token;
-  config.username = username;
-  // config.password = password;
-  config.remember = true;
-  await saveExtensionConfig(config);
-  txtSession.textContent = `Logged in.`;
-
-  if (token.length > 10) {
-    loadingSign.style.display = "none";
-  }
-
-  return Promise.resolve();
+    if (token.length > 10) {
+      loadingSign.style.display = "none";
+    }
+    return Promise.resolve();
+  }).catch(err => {
+    txtSession.textContent = err.toString();
+  });
 }
 
 btnLogin.addEventListener("click", () => {

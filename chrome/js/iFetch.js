@@ -42,6 +42,9 @@ class iFetch {
         var that = this;
         var url = new URL(route, baseUrl);
 
+        if (route.indexOf("http") >= 0) {
+          url = route
+        }
 
         // token
         if (token != '') {

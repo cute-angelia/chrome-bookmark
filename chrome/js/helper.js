@@ -2,20 +2,8 @@ export function getExtensionConfig() {
   return new Promise((resolve, reject) => {
     try {
       chrome.storage.local.get(null, function (items) {
-        var token = items.token || "";
-        var server = items.server || "";
-        if (token === "") {
-          return reject("no active session, please login first");
-        }
-        if (server === "") {
-          return reject("server url is not specified");
-        }
-        return resolve({
-          token: token,
-          server: server
-        });
+        return resolve(items);
       });
-
     } catch (err) {
       return reject(err);
     }
