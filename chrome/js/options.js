@@ -1,25 +1,6 @@
-import { getExtensionConfig } from "./helper.js";
+import store from "../internal/store/store.js";
 
-// async function getExtensionConfig() {
-//   var items = await chrome.storage.local.get();
-
-//   return {
-//     server: items.server || "",
-//     token: items.token || "",
-//     username: items.username || "",
-//     password: items.password || "",
-//     remember: items.remember || false,
-//   };
-// }
-
-async function saveExtensionConfig(cfg) {
-  return chrome.storage.local.set(cfg);
-}
-
-async function logout(server, token) {
-  return Promise.resolve();
-}
-
+// login api
 async function login(server, username, password, remember) {
   // Validate input
   if (server === "") {
@@ -70,12 +51,8 @@ async function login(server, username, password, remember) {
     throw new Error(err);
   }
 
-  var jsonResp = await response.json(),
-    token = jsonResp.data.token;
-
-  console.log(token);
-
-  return token;
+  var jsonResp = await response.json();
+  return jsonResp;
 }
 
 // Define function for UI handler
@@ -86,6 +63,7 @@ var errorMessage = document.getElementById("error-message"),
   inputPassword = document.getElementById("input-password"),
   inputRemember = document.getElementById("input-remember"),
   btnLogin = document.getElementById("btn-login"),
+  btnLogout = document.getElementById("btn-logout"),
   loadingSign = document.getElementById("loading-sign"),
   config = {};
 
@@ -108,19 +86,23 @@ function hideError() {
   errorMessage.style.display = "none";
 }
 
-getExtensionConfig()
-  .then(cfg => {
-    config = cfg;
+// 读取配置
+store.get().then(cfg => {
+  if (cfg.token === "") txtSession.textContent = "No active session";
+  else txtSession.textContent = `Logged in success by ` + cfg.username;
 
-    if (cfg.token === "") txtSession.textContent = "No active session";
-    else txtSession.textContent = `Logged in success by` + cfg.username;
+  inputServer.value = cfg.server;
+  inputUsername.value = cfg.username;
+  inputPassword.value = cfg.password;
 
-    inputServer.value = cfg.server;
-    inputUsername.value = cfg.username;
-    inputPassword.value = cfg.password;
-    // inputRemember.checked = cfg.remember;
-  })
-  .catch(err => showError(err));
+  // Show logout button if token is not empty
+  if (cfg.token !== "") {
+    btnLogout.style.display = "block";
+    btnLogin.style.display = "none";
+  }
+
+}).catch(err => showError(err));
+
 
 // Register event listener
 async function btnLoginClick() {
@@ -131,27 +113,47 @@ async function btnLoginClick() {
   // remember = inputRemember.checked;
 
   // Login using input value
-  var token = await login(server, username, password, true);
+  const resp = await login(server, username, password, true);
 
-  // Save input value and token to config
+  if (resp.code !== 0) {
+    throw new Error(resp.msg || "login failed");
+  } else {
+    const token = resp.data?.token || "";
+    // Save input value and token to config
+    if (server.endsWith("/")) {
+      server = server.slice(0, -1);
+    }
+    config.server = server;
+    config.token = token;
+    config.username = username;
+    // config.password = password;
+    config.remember = true;
+    console.log(config, "config");
 
-  if (server.endsWith("/")) {
-    server = server.slice(0, -1);
+    // Update store
+    store.trigger('save', config)
+
+    // txtSession.textContent = `Logged in.`;
+    setTipMsg(`Logged in success by ${username}`);
+
+    if (token.length > 10) {
+      loadingSign.style.display = "none";
+
+      // ui
+      btnLogout.style.display = "block";
+      btnLogin.style.display = "none";
+    }
+
+    store.get().then(cfg => {
+      console.log(cfg, "cfg");
+    })
+    return Promise.resolve();
   }
+}
 
-  config.server = server;
-  config.token = token;
-  config.username = username;
-  // config.password = password;
-  config.remember = true;
-  await saveExtensionConfig(config);
-  txtSession.textContent = `Logged in.`;
-
-  if (token.length > 10) {
-    loadingSign.style.display = "none";
-  }
-
-  return Promise.resolve();
+function setTipMsg(msg) {
+  txtSession.textContent = msg;
+  txtSession.style.color = "red";
 }
 
 btnLogin.addEventListener("click", () => {
@@ -161,4 +163,19 @@ btnLogin.addEventListener("click", () => {
   btnLoginClick()
     .catch(err => showError(err))
     .finally(() => hideLoading());
+});
+
+btnLogout.addEventListener("click", () => {
+  hideError();
+  hideLoading();
+
+  store.clear();
+
+  inputUsername.value = "";
+  inputPassword.value = "";
+
+  // Update UI
+  txtSession.textContent = "";
+  btnLogout.style.display = "none";
+  btnLogin.style.display = "block";
 });

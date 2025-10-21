@@ -57,3 +57,16 @@ chrome.runtime.onMessage.addListener(request => {
       break;
   }
 });
+
+// 保持唤醒状态
+const wakeup = () => {
+  chrome.runtime.sendMessage({
+    cmd: "ping",
+    data: {}
+  },
+    function (resp) {
+      // console.log(resp);
+    }
+  );
+}
+setInterval(wakeup, 30000);

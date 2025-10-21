@@ -1,76 +1,82 @@
 {
-  "manifest_version": 2,
-  "version": "0.8.7",
-  "name": "Bookmark",
-  "author": "Bookmark Team",
-  "description": "a simple bookmark manager.",
-  "homepage_url": "https://github.com/cute-angelia/shiori-web-ext",
-  "icons": {
-    "48": "icons/icon-48.png",
-    "96": "icons/icon-96.png"
-  },
-
-  "permissions": [
-    "<all_urls>",
-    "tabs",
-    "storage",
-    "tabCapture",
-    "bookmarks",
-    "notifications"
-  ],
-
-  "background": {
-    "scripts": [
-      "dist/browser-polyfill.entry.js",
-      "dist/background.entry.js"
-    ]
-  },
-
-  "content_scripts": [{
-    "matches": ["<all_urls>"],
-    "css": ["css/dialog.css"],
-    "js": [
-      "dist/browser-polyfill.entry.js",
-      "dist/content-script.entry.js"
-    ]
-  }],
-
-  "options_ui": {
-    "page": "view/options.html",
-    "browser_style": true,
-    "chrome_style": true
-  },
-
-  "browser_action": {
-    "browser_style": true,
-    "default_title": "Shiori",
-    "default_popup": "view/popup.html",
-    "default_icon": {
-      "16": "icons/action-default-16.png",
-      "32": "icons/action-default-32.png",
-      "64": "icons/action-default-64.png"
+    "name": "截屏书签-CutBookmark",
+    "version": "0.8.8",
+    "manifest_version": 3,
+    "author": "Bookmark Team",
+    "description": "一个简单的书签管理工具，支持截屏书签、标签书签、文件夹书签等功能。",
+    "homepage_url": "https://github.com/cute-angelia/shiori-web-ext",
+    "icons": {
+        "16": "icons/icon-48.png",
+        "48": "icons/icon-48.png",
+        "96": "icons/icon-96.png",
+        "128": "icons/icon-96.png"
     },
-    "theme_icons": [{
-      "dark": "icons/action-dark-16.png",
-      "light": "icons/action-light-16.png",
-      "size": 16
-    }, {
-      "dark": "icons/action-dark-32.png",
-      "light": "icons/action-light-32.png",
-      "size": 32
-    }, {
-      "dark": "icons/action-dark-64.png",
-      "light": "icons/action-light-64.png",
-      "size": 64
-    }]
-  },
-
-  "commands": {
-    "_execute_browser_action": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+F"
-      },
-      "description": "Show bookmark popup"
-    }
-  }
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "*.js",
+                "icons/*.png"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
+    "background": {
+        "service_worker": "background-wrapper.js"
+    },
+    "permissions": [
+        "tabs",
+        "storage",
+        "tabCapture",
+        "bookmarks",
+        "activeTab",
+        "notifications"
+    ],
+    "host_permissions": ["*://*/*"],
+    "options_page": "view/options.html",
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "css": [
+                "css/dialog.css"
+            ],
+            "js": [
+                "dist/browser-polyfill.entry.js",
+                "dist/content-script.entry.js"
+            ]
+        }
+    ],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self';"
+    },
+    "action": {
+        "browser_style": true,
+        "default_title": "Shiori",
+        "default_popup": "view/popup.html",
+        "default_icon": {
+            "16": "icons/action-default-16.png",
+            "32": "icons/action-default-32.png",
+            "64": "icons/action-default-64.png"
+        },
+        "theme_icons": [
+            {
+                "dark": "icons/action-dark-16.png",
+                "light": "icons/action-light-16.png",
+                "size": 16
+            },
+            {
+                "dark": "icons/action-dark-32.png",
+                "light": "icons/action-light-32.png",
+                "size": 32
+            },
+            {
+                "dark": "icons/action-dark-64.png",
+                "light": "icons/action-light-64.png",
+                "size": 64
+            }
+        ]
+    } 
 }

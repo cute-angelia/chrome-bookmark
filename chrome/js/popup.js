@@ -1,3 +1,6 @@
+import { sendMessageWithPromise } from "../internal/helper/chrome.js";
+console.log("popup.js loaded");
+
 // Get DOM
 var inputTags = document.getElementById("input-tags"),
   btnRemove = document.getElementById("btn-remove"),
@@ -36,22 +39,20 @@ btnRemove.addEventListener("click", (e) => {
   chrome.runtime.sendMessage({
     type: "remove-bookmark",
   }, (resp) => {
-    console.log(resp);
+    // console.log(resp);
     window.close()
   });
-
-
 });
 
 btnLibraries.addEventListener("click", (e) => {
-  chrome.runtime.sendMessage({
-    type: "open-libraries",
-  }, (resp) => {
+  console.log("open-libraries sent1");
+  var msg = { type: "open-libraries" }
+  sendMessageWithPromise(msg).then((resp) => {
     console.log(resp);
-    window.close()
-  });
-
+    return resp;
+  })
 });
+
 
 btnSave.addEventListener("click", (e) => {
   // Get input value
@@ -73,7 +74,6 @@ btnSave.addEventListener("click", (e) => {
     type: "save-bookmark",
     tags: tags,
   }, (resp) => {
-    console.log(resp);
     window.close()
   });
 

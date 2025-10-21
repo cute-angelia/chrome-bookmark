@@ -1,5 +1,131 @@
-import { getExtensionConfig, getCurrentTab, openOptionsPage, getShioriBookmarkFolder, saveLocalBookmark, removeLocalBookmark, findLocalBookmark } from "./helper.js";
-import ifetch from "./iFetch.js"
+import bookmark from "../internal/bookmark/bookmark.js";
+
+console.log("background-script.js loaded");
+
+// 事件 - 监听
+chrome.runtime.onMessage.addListener(function (
+  request,
+  sender,
+  sendResponseParam
+) {
+
+  var responseStatus = {
+    bCalled: false
+  }
+
+  console.log("background-script.js onMessage", request);
+
+  function sendResponse(obj) {
+    console.log('请求 onMessage -> ', request, obj);
+    //dummy wrapper to deal with exceptions and detect async
+    try {
+      sendResponseParam(obj)
+    } catch (e) {
+      //error handling
+    }
+    responseStatus.bCalled = true
+  }
+
+  switch (request.cmd || request.method || request.type) {
+    case 'ping':
+      sendResponse({
+        'msg': 'pong'
+      })
+      break
+
+    // 打开远程库 openLibraries
+    case "open-libraries":
+      bookmark.openLibraries();
+      sendResponse({ status: "success" });
+      break;
+
+    // 保存书签 saveBookmark
+    case "save-bookmark":
+      bookmark.saveBookmark(request.tags).then(resp => {
+        bookmark.updateIcon();
+      });
+      sendResponse({ status: "success" });
+      break;
+
+    // 删除书签 removeBookmark
+    case "remove-bookmark":
+      bookmark.removeBookmark().then(resp => {
+        bookmark.updateIcon();
+      });
+      sendResponse({ status: "success" });
+      break;
+
+
+
+    // 获取配置 getConfig
+    case 'GetConfigList':
+      Store.get("configList").then(configList => {
+        var data = {
+          "configList": configList
+        }
+        sendResponse(data)
+      });
+      break
+
+    case 'getDefaultConfig':
+      sendResponse(Store.getDefaultConfig())
+      break
+
+
+    case 'saveConfig':
+      Store.setCfg(request.data.key, request.data.value)
+
+      try {
+        var newdata = JSON.stringify(request.data.value)
+        JSON.parse(newdata)
+        notify("系统通知", "配置保存成功")
+      } catch (error) {
+        notify("系统通知", "保存失败")
+      }
+
+
+      // 重置
+      setTimeout(() => {
+        initContextMenus()
+      }, 300);
+
+      sendResponse({})
+      break
+  }
+
+  //if its set, the call wasn't async, else it is.
+  if (!responseStatus.bCalled) {
+    return true
+  }
+})
+
+// 安装时打开 onboarding.html
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === 'install') {
+    bookmark.openOptionsPage();
+  }
+});
+
+// 监听标签页状态变化
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+  // 检查标签页是否已完成加载
+  if (changeInfo.status === 'complete' && tab.url) {
+    console.log('标签页加载完成:', {
+      id: tabId,
+      url: tab.url,
+      title: tab.title,
+      windowId: tab.windowId
+    });
+
+    // 可以在这里添加更多处理逻辑
+    // 例如：注入内容脚本、发送消息等
+    bookmark.updateIcon();
+  }
+});
+
+chrome.bookmarks.onCreated.addListener(bookmark.updateIcon);
+chrome.bookmarks.onRemoved.addListener(bookmark.updateIcon);
+
 
 async function getPageContent(tab) {
   try {
@@ -12,170 +138,3 @@ async function getPageContent(tab) {
   }
 }
 
-function openLibraries() {
-  return new Promise(function (resolve, reject) {
-    getExtensionConfig().then(config => {
-      chrome.tabs.create({
-        active: true,
-        url: config.server,
-      });
-      resolve();
-    }).catch(err => {
-      if (err.toString().includes("login")) {
-        openOptionsPage()
-      }
-      reject(err)
-    })
-  });
-}
-
-function removeBookmark() {
-  return new Promise(function (resolve, reject) {
-    getCurrentTab().then(tab => {
-      ifetch.post("/api/bookmarks/deleteUrl", {
-        url: tab.url,
-      }).then(data => {
-        if (data.code != 0) {
-          return reject(data.msg)
-        } else {
-          // Remove local bookmark
-          removeLocalBookmark(tab.url);
-          return resolve();
-        }
-      }).catch(err => {
-        if (err.toString().includes("login")) {
-          openOptionsPage()
-        } else {
-          return reject(err.toString())
-        }
-      })
-    })
-  })
-
-}
-
-function saveBookmark(tags) {
-  // Get value from async function
-  return new Promise(function (resolve, reject) {
-    getCurrentTab().then(tab => {
-      // 截图
-      // 捕获当前选项卡中可见区域的屏幕截图
-      chrome.tabs.captureVisibleTab(null, {}, function (dataUrl) {
-        ifetch.post("/api/bookmarks/add", {
-          url: tab.url,
-          title: tab.title,
-          from: "ext",
-          tags: tags.join(","),
-          imgbase64: dataUrl
-        }).then(data => {
-          if (data.code != 0) {
-            return reject(data.msg)
-          } else {
-            // Save to local bookmark
-            saveLocalBookmark(tab.url, tab.title);
-            return resolve();
-          }
-        }).catch(err => {
-          console.log(err.toString());
-          if (err.toString().includes("login")) {
-            openOptionsPage()
-          } else {
-            return reject(err.toString())
-          }
-        })
-      });
-
-    })
-  });
-}
-
-function updateIcon() {
-  // Set initial icon
-  var runtimeUrl = chrome.runtime.getURL("/"),
-    icon = {
-      path: {
-        16: "icons/action-default-16.png",
-        32: "icons/action-default-32.png",
-        64: "icons/action-default-64.png"
-      }
-    };
-
-  // Firefox allows using empty object as default icon.
-  // This way, Firefox will use default_icon that defined in manifest.json
-  if (runtimeUrl.startsWith("moz")) {
-    icon = {};
-  }
-
-  // Get current active tab
-
-  getCurrentTab().then(tab => {
-
-    findLocalBookmark(tab.url).then(local => {
-      if (local) icon.path = {
-        16: "icons/action-bookmarked-16.png",
-        32: "icons/action-bookmarked-32.png",
-        64: "icons/action-bookmarked-64.png"
-      }
-
-      return chrome.browserAction.setIcon(icon);
-    })
-
-  })
-}
-
-// Define event handler
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  var task = Promise.resolve();
-
-  switch (request.type) {
-    case "open-libraries":
-      task = new Promise((resolve, reject) => {
-        openLibraries()
-          .then(() => {
-            resolve()
-          })
-          .catch(err => {
-            reject(err)
-          });
-      });
-      break;
-    case "remove-bookmark":
-      task = new Promise((resolve, reject) => {
-        removeBookmark()
-          .then(() => {
-            resolve()
-          })
-          .catch(err => {
-            reject(err)
-          });
-      });
-      break;
-    case "save-bookmark":
-      task = new Promise((resolve, reject) => {
-        saveBookmark(request.tags)
-          .then(() => {
-            console.log("save-bookmark success");
-            resolve()
-          })
-          .catch(err => {
-            console.log("save-bookmark error", err);
-            reject(err)
-          });
-      });
-      break;
-  }
-
-  return task;
-});
-
-// Add handler for icon change
-function updateActiveTab() {
-  updateIcon()
-}
-
-chrome.bookmarks.onCreated.addListener(updateActiveTab);
-chrome.bookmarks.onRemoved.addListener(updateActiveTab);
-chrome.tabs.onUpdated.addListener(updateActiveTab);
-chrome.tabs.onActivated.addListener(updateActiveTab);
-chrome.windows.onFocusChanged.addListener(updateActiveTab);
-updateActiveTab();
