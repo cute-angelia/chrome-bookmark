@@ -131,8 +131,8 @@ class bookmark {
   saveBookmark(tags) {
     var that = this;
     return new Promise(function (resolve, reject) {
-      store.get().then(cnf => {
-        getCurrentTab().then(tab => {
+      getCurrentTab().then(tab => {
+        store.get().then(cnf => {
           // 截图
           // 捕获当前选项卡中可见区域的屏幕截图
           chrome.tabs.captureVisibleTab(null, {}, function (dataUrl) {
@@ -146,7 +146,14 @@ class bookmark {
             }
             ihttp.post("/api/bookmarks/add", data).then(resp => {
               if (resp.code != 0) {
-                return reject(resp.msg)
+
+                console.log(resp, "save api")
+
+                if (resp.code == -999) {
+                  that.openOptionsPage()
+                }
+                reject(resp.msg)
+                return
               } else {
                 // Save to local bookmark
                 saveLocalBookmark(data.url, data.title);
@@ -157,14 +164,12 @@ class bookmark {
               if (err.toString().includes("login")) {
                 that.openOptionsPage()
               } else {
-                return reject(err.toString())
+                reject(err.toString())
               }
             })
           });
         })
       });
-    }).catch(err => {
-      console.log(err.toString());
     })
   }
 
@@ -172,8 +177,8 @@ class bookmark {
   removeBookmark() {
     var that = this;
     return new Promise(function (resolve, reject) {
-      store.get().then(cnf => {
-        getCurrentTab().then(tab => {
+      getCurrentTab().then(tab => {
+        store.get().then(cnf => {
           const ihttp = new iFetch(cnf.server, cnf.token)
           var data = {
             url: tab.url,
@@ -189,7 +194,7 @@ class bookmark {
             if (err.toString().includes("login")) {
               that.openOptionsPage()
             } else {
-              return reject(err.toString())
+              reject(err.toString())
             }
           })
         })

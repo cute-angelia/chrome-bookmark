@@ -8,24 +8,12 @@ var inputTags = document.getElementById("input-tags"),
   btnSave = document.getElementById("btn-save"),
   loading = document.getElementById("loading-sign");
 
-async function showError(err) {
-  var tabs = await chrome.tabs.query({
-    currentWindow: true,
-    active: true,
-  });
-
-  if (tabs.length < 1) {
-    throw new Error("no tab available");
-  }
-
-  if (err instanceof Error) {
-    err = err.message;
-  }
-
-  return chrome.tabs.sendMessage(tabs[0].id, {
-    type: "show-error",
-    message: err,
-  });
+function showError(err) {
+  var msg = { type: "notify", title: "系统通知", message: err }
+  sendMessageWithPromise(msg).then((resp) => {
+    console.log(resp);
+    return resp;
+  })
 }
 
 // Add event handler
@@ -74,7 +62,12 @@ btnSave.addEventListener("click", (e) => {
     type: "save-bookmark",
     tags: tags,
   }, (resp) => {
-    window.close()
+    console.log(resp)
+    if (resp.status === "success") {
+      window.close()
+    } else {
+      showError(resp.message);
+    }
   });
 
 });

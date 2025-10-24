@@ -1,4 +1,5 @@
 import bookmark from "../internal/bookmark/bookmark.js";
+import { notify } from "../internal/helper/chrome.js";
 
 console.log("background-script.js loaded");
 
@@ -33,6 +34,13 @@ chrome.runtime.onMessage.addListener(function (
       })
       break
 
+    case 'notify':
+      notify(request.title, request.message)
+      sendResponse({
+        'status': 'success'
+      })
+      break
+
     // 打开远程库 openLibraries
     case "open-libraries":
       bookmark.openLibraries();
@@ -43,8 +51,11 @@ chrome.runtime.onMessage.addListener(function (
     case "save-bookmark":
       bookmark.saveBookmark(request.tags).then(resp => {
         bookmark.updateIcon();
+        sendResponse({ status: "success" });
+      }).catch(err => {
+        console.error(err);
+        sendResponse({ status: "error", message: err });
       });
-      sendResponse({ status: "success" });
       break;
 
     // 删除书签 removeBookmark

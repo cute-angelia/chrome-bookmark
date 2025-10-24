@@ -68,12 +68,12 @@ var errorMessage = document.getElementById("error-message"),
   config = {};
 
 function showLoading() {
-  btnLogin.style.display = "none";
+  // btnLogin.style.display = "none";
   loadingSign.style.display = "block";
 }
 
 function hideLoading() {
-  btnLogin.style.display = "block";
+  // btnLogin.style.display = "block";
   loadingSign.style.display = "none";
 }
 
