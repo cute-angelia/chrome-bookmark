@@ -8,6 +8,8 @@ var inputTags = document.getElementById("input-tags"),
   btnSave = document.getElementById("btn-save"),
   loading = document.getElementById("loading-sign");
 
+var isButtonDisabled = false;
+
 function showError(err) {
   var msg = { type: "notify", title: "系统通知", message: err }
   sendMessageWithPromise(msg).then((resp) => {
@@ -43,6 +45,9 @@ btnLibraries.addEventListener("click", (e) => {
 
 
 btnSave.addEventListener("click", (e) => {
+  if (isButtonDisabled) return;
+  isButtonDisabled = true;
+
   // Get input value
   var tags = inputTags.value
     .toLowerCase()
@@ -67,6 +72,7 @@ btnSave.addEventListener("click", (e) => {
       window.close()
     } else {
       showError(resp.message);
+      isButtonDisabled = false;
     }
   });
 
