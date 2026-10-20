@@ -251,13 +251,14 @@
             <div class="flex items-center justify-between mt-1.5">
               <div class="flex items-center gap-1 flex-wrap">
                 <span class="text-[10px] text-indigo-600">{{ bm.source === 'chrome' ? 'Chrome' : bm.source === 'remote' ? '远程' : '本地' }}</span>
-                <span
+                <button
                   v-for="tag in bm.tags?.slice(0, 2)"
                   :key="tag"
-                  class="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200"
+                  @click.stop="toggleTagFilter(tag)"
+                  class="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition cursor-pointer"
                 >
                   #{{ tag }}
-                </span>
+                </button>
                 <span v-if="bm.tags?.length > 2" class="text-[9px] text-slate-400">+{{ bm.tags.length - 2 }}</span>
               </div>
 
@@ -573,6 +574,8 @@ function toggleTagFilter(tag) {
     selectedTagFilter.value = '';
   } else {
     selectedTagFilter.value = tag;
+    // 空的智能视图（如"已置顶"）会叠加标签过滤导致结果为空，选标签时回到全部视图。
+    activeView.value = 'all';
   }
 }
 
