@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "截屏书签-CutBookmark",
+  "version": "2.0.0",
+  "description": "现代化的智能截屏与书签管理工具，支持一键截屏快照、标签分组、智能归类与视觉画廊。",
+  "icons": {
+    "16": "icons/action-default-16.png",
+    "32": "icons/action-default-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "截屏书签",
+    "default_icon": {
+      "16": "icons/action-default-16.png",
+      "32": "icons/action-default-32.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "tabs",
+    "activeTab",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}
