@@ -54,16 +54,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const url = tab.url;
           const title = tab.title;
 
-          // 1. 本地 Shiori 文件夹同步
+          // 1. 本地书签文件夹同步
           await saveToShioriFolder(url, title);
           setExtensionBookmarkIcon(true);
 
-          // 2. 远程 API 同步
+          // 2. 远程 API 同步 (若未传截图则尝试通过 background 兜底截屏)
+          let imgbase64 = request.imgbase64 || '';
+          if (!imgbase64 && chrome.tabs?.captureVisibleTab) {
+            try {
+              imgbase64 = await new Promise((resolve) => {
+                chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 90 }, (dataUrl) => {
+                  if (chrome.runtime?.lastError || !dataUrl) {
+                    resolve('');
+                  } else {
+                    resolve(dataUrl);
+                  }
+                });
+              });
+            } catch (err) {
+              // 忽略兜底截图失败
+            }
+          }
+
           const res = await remoteAddBookmark({
             url,
             title,
             tags: request.tags || [],
-            imgbase64: request.imgbase64 || ''
+            imgbase64
           });
 
           sendResponse({ status: 'success', remote: res });
@@ -79,7 +96,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const tab = request.tab || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
           const url = tab.url;
 
-          // 1. 本地 Shiori 文件夹移除
+          // 1. 本地书签文件夹移除
           await removeFromShioriFolder(url);
           setExtensionBookmarkIcon(false);
 

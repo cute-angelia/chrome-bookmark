@@ -43,6 +43,21 @@ async function transact(store, mode, run) {
   });
 }
 
+export function serializeRecord(value) {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    const len = value.length;
+    const arr = new Array(len);
+    for (let i = 0; i < len; i++) arr[i] = serializeRecord(value[i]);
+    return arr;
+  }
+  const result = {};
+  for (const key of Object.keys(value)) {
+    result[key] = serializeRecord(value[key]);
+  }
+  return result;
+}
+
 export function readIndexedRecords(store) {
   return transact(store, 'readonly', (records, done) => {
     const request = records.getAll();
@@ -52,10 +67,24 @@ export function readIndexedRecords(store) {
 
 export async function writeIndexedRecords(store, records) {
   // Vue state contains proxies; serialize before passing records to IndexedDB's structured clone.
-  const snapshot = JSON.parse(JSON.stringify(records));
+  const snapshot = serializeRecord(records);
   await transact(store, 'readwrite', collection => {
     collection.clear();
     snapshot.forEach(record => collection.put(record));
   });
   return records;
+}
+
+export async function updateIndexedRecord(store, record) {
+  const snapshot = serializeRecord(record);
+  await transact(store, 'readwrite', collection => {
+    collection.put(snapshot);
+  });
+  return record;
+}
+
+export async function deleteIndexedRecord(store, id) {
+  await transact(store, 'readwrite', collection => {
+    collection.delete(id);
+  });
 }

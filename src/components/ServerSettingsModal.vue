@@ -13,7 +13,7 @@
           </div>
           <div>
             <h3 class="text-sm font-bold text-slate-900">自建远程服务连接设置</h3>
-            <p class="text-[10px] text-slate-400">Shiori / 自建书签服务后端 API</p>
+            <p class="text-[10px] text-slate-400">自建书签服务后端 API</p>
           </div>
         </div>
         <button @click="close" class="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">

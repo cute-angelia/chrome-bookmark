@@ -1,5 +1,6 @@
 import { isChromeExtension } from './bookmarkStorage.js';
 import { readIndexedRecords, writeIndexedRecords } from './indexedDb.js';
+import { normalizeBookmarkUrl } from './bookmarkLibrary.js';
 
 const CONFIG_KEY = 'cutbookmark_shiori_config_v2';
 
@@ -43,7 +44,10 @@ export async function saveServerConfig(config) {
       });
     });
   }
-  await writeIndexedRecords('settings', [{ id: CONFIG_KEY, value: config }]);
+  const settings = await readIndexedRecords('settings');
+  const filtered = settings.filter(record => record.id !== CONFIG_KEY);
+  filtered.push({ id: CONFIG_KEY, value: config });
+  await writeIndexedRecords('settings', filtered);
   return config;
 }
 
@@ -65,7 +69,18 @@ export async function fetchRemoteBookmarks(config) {
 export async function fetchRemoteBookmarkUpdates(config, cached = []) {
   if (!config.server || !config.token) return { bookmarks: [], complete: false };
   const server = config.server.replace(/\/+$/, '');
-  const knownIds = new Set(cached.filter(bookmark => bookmark.remoteId != null).map(bookmark => String(bookmark.remoteId)));
+  const knownIds = new Set();
+  for (const b of cached) {
+    if (b.remoteId != null) knownIds.add(String(b.remoteId));
+    if (b.id != null) {
+      knownIds.add(String(b.id));
+      if (typeof b.id === 'string' && b.id.startsWith('remote:')) {
+        const parts = b.id.split(':');
+        const lastPart = parts.at(-1);
+        if (lastPart) knownIds.add(lastPart);
+      }
+    }
+  }
   const bookmarks = [];
   let maxPage = 1;
   for (let page = 1; page <= maxPage; page++) {
@@ -230,5 +245,37 @@ export async function openRemoteLibraries() {
     chrome.tabs.create({ url: targetUrl });
   } else {
     window.open(targetUrl, '_blank');
+  }
+}
+
+/**
+ * 根据 URL 针对单个书签精确查询远端数据，不拉取全量列表
+ */
+export async function fetchRemoteBookmarkByUrl(url) {
+  if (!url) return null;
+  const config = await getServerConfig();
+  if (!config.server || !config.token) return null;
+  const server = config.server.replace(/\/+$/, '');
+
+  try {
+    const response = await fetch(`${server}/api/bookmarks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.token}`
+      },
+      body: JSON.stringify({ keyword: url, tags: '', exclude: '', page: 1 }),
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) return null;
+    const json = await response.json();
+    if (json.code !== 0 || !Array.isArray(json.data?.bookmarks)) return null;
+
+    const normTarget = normalizeBookmarkUrl(url);
+    const matched = json.data.bookmarks.find(b => normalizeBookmarkUrl(b.url) === normTarget);
+    return matched || null;
+  } catch (err) {
+    console.warn(`Fetch remote bookmark by url (${url}) failed:`, err);
+    return null;
   }
 }

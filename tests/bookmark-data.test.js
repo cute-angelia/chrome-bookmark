@@ -3,7 +3,10 @@ import { IDBFactory } from 'fake-indexeddb';
 import assert from 'node:assert/strict';
 import * as api from '../src/services/shioriApi.js';
 import * as library from '../src/services/bookmarkLibrary.js';
-import { getStoredBookmarks, getStoredFolders, saveStoredBookmarks, saveStoredFolders } from '../src/services/bookmarkStorage.js';
+import {
+  getStoredBookmarks, getStoredFolders, saveStoredBookmarks, saveStoredFolders,
+  getLastBookmarkSyncTime, setLastBookmarkSyncTime, isSameDay, isBookmarkSyncNeeded
+} from '../src/services/bookmarkStorage.js';
 import { INITIAL_BOOKMARKS, INITIAL_FOLDERS } from '../src/data/mockBookmarks.js';
 
 const values = new Map();
@@ -160,6 +163,54 @@ test('new records continue paging until the entire next page is already cached',
   assert.equal(result.complete, false);
 });
 
+test('cached multi-source bookmarks with remoteId or remote:... id stop pagination', async () => {
+  const pages = [];
+  globalThis.fetch = async (_url, options) => {
+    const page = JSON.parse(options.body).page;
+    pages.push(page);
+    return { ok: true, json: async () => ({ code: 0, data: { page, maxPage: 5,
+      bookmarks: [{ id: 101, title: 'Item 101' }, { id: 102, title: 'Item 102' }] } }) };
+  };
+  const result = await api.fetchRemoteBookmarkUpdates({ server: 'https://server.test', token: 'secret' }, [
+    { id: 'chrome:12', source: 'chrome', remoteId: 101, isRemote: true },
+    { id: 'remote:https://server.test:102', source: 'remote' }
+  ]);
+  assert.deepEqual(pages, [1]);
+  assert.equal(result.complete, false);
+});
+
+test('mergeLibraryBookmarks preserves tags and notes from stored popup bookmark when incoming chrome library has empty tags', () => {
+  const stored = [
+    {
+      id: 'chrome:100',
+      nativeId: '100',
+      source: 'chrome',
+      url: 'https://example.com/popup',
+      title: 'Popup Bookmark',
+      tags: ['popup-tag1', 'popup-tag2'],
+      screenshot: 'data:image/png;base64,abc',
+      notes: 'popup note'
+    }
+  ];
+  const incoming = [
+    {
+      id: 'chrome:100',
+      nativeId: '100',
+      source: 'chrome',
+      url: 'https://example.com/popup',
+      title: 'Popup Bookmark',
+      tags: [],
+      screenshot: '',
+      notes: ''
+    }
+  ];
+  const merged = library.mergeLibraryBookmarks(stored, incoming);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0].tags, ['popup-tag1', 'popup-tag2']);
+  assert.equal(merged[0].screenshot, 'data:image/png;base64,abc');
+  assert.equal(merged[0].notes, 'popup note');
+});
+
 test('partial refresh retains untouched cached pages while refreshing fetched records', () => {
   const result = library.mergeRemoteBookmarks([
     { id: 'remote:1', title: 'Old' }, { id: 'remote:2', title: 'Untouched' }
@@ -187,4 +238,207 @@ test('unchanged refresh preserves bookmark references and only replaces actual c
   const changed = library.reconcileRecords(old, [{ ...old[0], title: 'Changed' }]);
   assert.equal(changed[0].title, 'Changed');
   assert.notEqual(changed[0], old[0]);
+});
+
+test('isSameDay accurately compares dates and handles invalid inputs', () => {
+  const morning = new Date(2026, 9, 21, 9, 0, 0).getTime();
+  const evening = new Date(2026, 9, 21, 21, 30, 0).getTime();
+  const nextDay = new Date(2026, 9, 22, 9, 0, 0).getTime();
+
+  assert.equal(isSameDay(morning, evening), true);
+  assert.equal(isSameDay(morning, nextDay), false);
+  assert.equal(isSameDay(0, evening), false);
+  assert.equal(isSameDay(null, evening), false);
+  assert.equal(isSameDay(NaN, evening), false);
+});
+
+test('isBookmarkSyncNeeded ensures full sync runs only once per day unless empty', () => {
+  const now = Date.now();
+  const yesterday = now - 24 * 60 * 60 * 1000 - 1000;
+
+  // Never synced: needed
+  assert.equal(isBookmarkSyncNeeded(0, true), true);
+  assert.equal(isBookmarkSyncNeeded(null, true), true);
+
+  // Cached list is empty: needed
+  assert.equal(isBookmarkSyncNeeded(now, false), true);
+
+  // Synced yesterday: needed
+  assert.equal(isBookmarkSyncNeeded(yesterday, true), true);
+
+  // Synced today and has cached bookmarks: not needed
+  assert.equal(isBookmarkSyncNeeded(now, true), false);
+});
+
+test('getLastBookmarkSyncTime and setLastBookmarkSyncTime persist timestamps across IndexedDB and chrome.storage', async () => {
+  // Test IndexedDB fallback when chrome.storage is not available
+  assert.equal(await getLastBookmarkSyncTime(), 0);
+  const now = Date.now();
+  await setLastBookmarkSyncTime(now);
+  assert.equal(await getLastBookmarkSyncTime(), now);
+
+  // Test chrome.storage.local when available
+  const mockStorage = new Map();
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: (keys, cb) => {
+          const res = {};
+          keys.forEach(k => { if (mockStorage.has(k)) res[k] = mockStorage.get(k); });
+          cb(res);
+        },
+        set: (obj, cb) => {
+          Object.entries(obj).forEach(([k, v]) => mockStorage.set(k, v));
+          cb();
+        }
+      }
+    }
+  };
+
+  assert.equal(await getLastBookmarkSyncTime(), 0);
+  const extNow = 1776789000000;
+  await setLastBookmarkSyncTime(extNow);
+  assert.equal(await getLastBookmarkSyncTime(), extNow);
+  assert.equal(mockStorage.get('cutbookmark_last_sync_time'), extNow);
+});
+
+test('normalizeBookmarkUrl accurately standardizes URLs with varying protocols, slashes and casings', () => {
+  assert.equal(library.normalizeBookmarkUrl('https://example.com/'), 'https://example.com');
+  assert.equal(library.normalizeBookmarkUrl('HTTPS://EXAMPLE.COM/path/'), 'https://example.com/path');
+  assert.equal(library.normalizeBookmarkUrl('https://example.com/path?foo=bar#hash'), 'https://example.com/path?foo=bar');
+  assert.equal(library.normalizeBookmarkUrl(''), '');
+  assert.equal(library.normalizeBookmarkUrl(null), '');
+});
+
+test('aggregateBookmarksByUrl merges local phantom, Chrome and Remote bookmarks into 1 unified record', () => {
+  const localPhantom = {
+    id: 'bm-12345',
+    title: 'Vue Doc',
+    url: 'https://vuejs.org/guide',
+    folder: '常用收集箱',
+    folderId: 'folder-custom',
+    screenshot: 'data:image/png;base64,localHQ',
+    tags: ['vue', 'frontend'],
+    notes: 'Personal study notes',
+    visits: 5,
+    pinned: true,
+    dateAdded: 1000
+  };
+  const chromeNative = {
+    id: 'chrome:101',
+    nativeId: '101',
+    source: 'chrome',
+    title: 'Vue.js Guide',
+    url: 'https://vuejs.org/guide/',
+    folder: '其他书签 / CutBookmark',
+    folderId: 'chrome:2',
+    ancestorIds: ['chrome:2'],
+    screenshot: '',
+    tags: [],
+    notes: '',
+    visits: 0,
+    pinned: false,
+    dateAdded: 2000
+  };
+  const remoteRecord = {
+    id: 'remote:https://shiori.test:202',
+    remoteId: 202,
+    server: 'https://shiori.test',
+    source: 'remote',
+    title: 'Vue.js Guide - Upstream',
+    url: 'https://vuejs.org/guide',
+    folder: '远程书签',
+    folderId: 'remote:https://shiori.test',
+    ancestorIds: ['remote:https://shiori.test'],
+    screenshot: 'https://shiori.test/thumb.png',
+    tags: ['official', 'vue'],
+    notes: 'Excerpt from remote',
+    visits: 1,
+    pinned: false,
+    dateAdded: 1500
+  };
+
+  const aggregated = library.aggregateBookmarksByUrl([localPhantom, chromeNative, remoteRecord]);
+  assert.equal(aggregated.length, 1);
+
+  const unified = aggregated[0];
+  assert.equal(unified.id, 'chrome:101');
+  assert.equal(unified.nativeId, '101');
+  assert.equal(unified.remoteId, 202);
+  assert.equal(unified.isNative, true);
+  assert.equal(unified.isRemote, true);
+  assert.deepEqual(unified.sources.sort(), ['chrome', 'remote']);
+
+  // Local screenshot takes precedence over remote thumbnail
+  assert.equal(unified.screenshot, 'data:image/png;base64,localHQ');
+
+  // Tags are deduplicated union
+  assert.deepEqual(unified.tags.sort(), ['frontend', 'official', 'vue']);
+
+  // Local notes preserved
+  assert.equal(unified.notes, 'Personal study notes');
+  assert.equal(unified.pinned, true);
+  assert.equal(unified.visits, 5);
+
+  // Belongs to Chrome folder primarily, but retains remoteFolderId for remote folder matching
+  assert.equal(unified.folder, '其他书签 / CutBookmark');
+  assert.equal(unified.remoteFolderId, 'remote:https://shiori.test');
+});
+
+test('remoteAddBookmark pushes local bookmark data to remote server', async () => {
+  await api.saveServerConfig({ server: 'https://server.test', token: 'valid-token' });
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, ...options });
+    return { ok: true, json: async () => ({ code: 0, msg: 'ok' }) };
+  };
+
+  const res = await api.remoteAddBookmark({
+    url: 'https://example.com/page',
+    title: 'My Page',
+    tags: ['tool', 'dev'],
+    imgbase64: 'data:image/png;base64,abc'
+  });
+
+  assert.equal(res.success, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://server.test/api/bookmarks/add');
+  assert.equal(calls[0].headers.Authorization, 'Bearer valid-token');
+  const payload = JSON.parse(calls[0].body);
+  assert.equal(payload.url, 'https://example.com/page');
+  assert.equal(payload.title, 'My Page');
+  assert.equal(payload.tags, 'tool,dev');
+  assert.equal(payload.imgbase64, 'data:image/png;base64,abc');
+});
+
+test('fetchRemoteBookmarkByUrl queries remote using exact url keyword instead of full list paging', async () => {
+  await api.saveServerConfig({ server: 'https://server.test', token: 'valid-token' });
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, ...options });
+    const body = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          page: 1,
+          maxPage: 1,
+          bookmarks: [
+            { id: 999, url: 'https://example.com/target', title: 'Target Book' },
+            { id: 1000, url: 'https://example.com/other', title: 'Other' }
+          ]
+        }
+      })
+    };
+  };
+
+  const matched = await api.fetchRemoteBookmarkByUrl('https://example.com/target');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://server.test/api/bookmarks');
+  const body = JSON.parse(calls[0].body);
+  assert.equal(body.keyword, 'https://example.com/target');
+  assert.equal(body.page, 1);
+  assert.equal(matched?.id, 999);
+  assert.equal(matched?.title, 'Target Book');
 });

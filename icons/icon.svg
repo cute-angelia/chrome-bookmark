@@ -1,0 +1,36 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGradient" x1="16" y1="16" x2="112" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4338CA" />
+      <stop offset="50%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+    <linearGradient id="folderGradient" x1="28" y1="46" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#F1F5F9" stop-opacity="0.9" />
+    </linearGradient>
+    <filter id="shadow" x="0" y="2" width="128" height="128" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#312E81" flood-opacity="0.3" />
+    </filter>
+  </defs>
+
+  <!-- Base Squircle Background -->
+  <rect x="6" y="6" width="116" height="116" rx="26" fill="url(#bgGradient)" filter="url(#shadow)" />
+
+  <!-- Folder Back Tab -->
+  <path d="M28 42C28 39.7909 29.7909 38 32 38H56C58.2091 38 60 39.7909 60 42V48H28V42Z" fill="white" fill-opacity="0.5" />
+  
+  <!-- Folder Back Body -->
+  <rect x="28" y="46" width="72" height="52" rx="6" fill="white" fill-opacity="0.55" />
+
+  <!-- Bookmark Ribbon Dropping in -->
+  <path d="M62 28H86V84L74 74L62 84V28Z" fill="white" />
+  <line x1="74" y1="36" x2="74" y2="66" stroke="#6366F1" stroke-width="2.5" stroke-linecap="round" />
+
+  <!-- Folder Front Flap -->
+  <rect x="24" y="58" width="80" height="42" rx="8" fill="url(#folderGradient)" />
+  <rect x="34" y="70" width="30" height="3" rx="1.5" fill="#6366F1" fill-opacity="0.8" />
+
+  <!-- Magic Sparkle -->
+  <path d="M100 24L102.5 31L109.5 33.5L102.5 36L100 43L97.5 36L90.5 33.5L97.5 31L100 24Z" fill="#FDE047" />
+</svg>

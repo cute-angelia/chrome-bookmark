@@ -1,6 +1,6 @@
 import { isChromeExtension } from './bookmarkStorage.js';
 
-const SHIORI_FOLDER_NAME = 'Shiori';
+const DEFAULT_FOLDER_NAME = 'CutBookmark';
 
 export async function findNativeBookmarkMatches(bookmark) {
   if (!isChromeExtension()) return [];
@@ -24,7 +24,7 @@ export async function moveNativeBookmark(native, folder, bookmark) {
 }
 
 /**
- * 获取或创建 Chrome 原生书签中的 "Shiori" 文件夹（位于「其他书签」目录下）
+ * 获取或创建 Chrome 原生书签中的默认书签文件夹（位于「其他书签」目录下）
  */
 export async function getOrCreateShioriFolder() {
   if (!isChromeExtension()) return null;
@@ -37,13 +37,13 @@ export async function getOrCreateShioriFolder() {
       if (chrome.runtime.lastError || !children) {
         return resolve(null);
       }
-      const existing = children.find(el => !el.url && el.title === SHIORI_FOLDER_NAME);
+      const existing = children.find(el => !el.url && (el.title === DEFAULT_FOLDER_NAME || el.title === 'Shiori'));
       if (existing) {
         return resolve(existing);
       }
       chrome.bookmarks.create({
         parentId,
-        title: SHIORI_FOLDER_NAME
+        title: DEFAULT_FOLDER_NAME
       }, (newFolder) => {
         resolve(newFolder);
       });
@@ -56,50 +56,68 @@ async function findShioriFolder() {
   return new Promise((resolve, reject) => {
     chrome.bookmarks.getChildren('2', children => {
       if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-      else resolve(children?.find(folder => !folder.url && folder.title === SHIORI_FOLDER_NAME) || null);
+      else resolve(children?.find(folder => !folder.url && (folder.title === DEFAULT_FOLDER_NAME || folder.title === 'Shiori')) || null);
     });
   });
 }
 
 /**
- * 将书签保存到本地 Chrome 原生的 Shiori 文件夹
+ * 将书签保存到本地 Chrome 原生书签文件夹（支持指定父级目录，默认为 CutBookmark 目录）
  */
-export async function saveToShioriFolder(url, title) {
-  if (!isChromeExtension()) return;
+export async function saveToShioriFolder(url, title, parentId = null) {
+  if (!isChromeExtension()) return null;
 
-  const folder = await getOrCreateShioriFolder();
-  if (!folder) return;
+  let targetParentId = parentId;
+  if (targetParentId && typeof targetParentId === 'string' && targetParentId.startsWith('chrome:')) {
+    targetParentId = targetParentId.slice('chrome:'.length);
+  }
+  if (!targetParentId) {
+    const folder = await getOrCreateShioriFolder();
+    if (folder) targetParentId = folder.id;
+  }
+  if (!targetParentId) return null;
 
   return new Promise((resolve) => {
     chrome.bookmarks.search({ url }, (existing) => {
-      const idx = (existing || []).findIndex(b => b.parentId === folder.id);
-      if (idx === -1) {
+      const found = (existing || []).find(b => b.parentId === targetParentId);
+      if (!found) {
         chrome.bookmarks.create({
-          parentId: folder.id,
+          parentId: targetParentId,
           title,
           url
-        }, () => resolve());
+        }, (node) => resolve(node));
       } else {
-        resolve();
+        if (title && found.title !== title) {
+          chrome.bookmarks.update(found.id, { title }, (node) => resolve(node));
+        } else {
+          resolve(found);
+        }
       }
     });
   });
 }
 
 /**
- * 从本地 Chrome 原生 Shiori 文件夹删除指定 URL 的书签
+ * 从本地 Chrome 原生书签文件夹删除指定 URL 的书签
  */
-export async function removeFromShioriFolder(url) {
+export async function removeFromShioriFolder(url, specificId = null) {
   if (!isChromeExtension()) return;
 
-  const folder = await findShioriFolder();
-  if (!folder) return;
+  if (specificId) {
+    try {
+      await chrome.bookmarks.remove(specificId);
+      return;
+    } catch {
+      // 忽略找不到特定 ID 的异常，继续按 URL 兜底清理
+    }
+  }
 
+  const folder = await findShioriFolder();
   return new Promise((resolve) => {
     chrome.bookmarks.search({ url }, (existing) => {
       if (existing) {
         existing.forEach(b => {
-          if (b.parentId === folder.id) {
+          if (!folder || b.parentId === folder.id) {
             chrome.bookmarks.remove(b.id);
           }
         });
@@ -110,7 +128,7 @@ export async function removeFromShioriFolder(url) {
 }
 
 /**
- * 检查指定 URL 是否已被收藏进 Shiori 文件夹
+ * 检查指定 URL 是否已被收藏进原生书签文件夹
  */
 export async function checkUrlInShioriFolder(url) {
   if (!isChromeExtension() || !url) return false;

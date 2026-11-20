@@ -56,18 +56,18 @@ function webUrl(url) {
   return parsed.href;
 }
 
-async function assertActive(tab) {
+async function assertActive(tab, requireComplete = false) {
   const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
-  if (active?.id !== tab.id || active.url !== tab.url || active.pendingUrl || active.status === 'loading') {
+  if (active?.id !== tab.id || (active.url && tab.url && active.url !== tab.url) || active.pendingUrl || (requireComplete && active.status === 'loading')) {
     throw new Error('截图时页面已切换或仍在加载，请重试');
   }
 }
 
-async function captureVerifiedTab(tab) {
-  await assertActive(tab);
-  const image = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  await assertActive(tab);
-  if (!image?.startsWith('data:image/png;base64,') || image.endsWith(',')) throw new Error('浏览器没有返回有效截图');
+async function captureVerifiedTab(tab, options = { format: 'jpeg', quality: 90 }, requireComplete = false) {
+  await assertActive(tab, requireComplete);
+  const image = await chrome.tabs.captureVisibleTab(tab.windowId, options);
+  await assertActive(tab, requireComplete);
+  if (!image?.startsWith('data:image/') || image.endsWith(',')) throw new Error('浏览器没有返回有效截图');
   return image;
 }
 

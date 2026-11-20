@@ -24,3 +24,167 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.6);
 }
+
+/* ==========================================================================
+   SweetAlert2 现代化定制主题 (契合 Indigo/Purple 风格体系)
+   ========================================================================== */
+
+/* 普通模态弹窗遮罩层（仅在非 Toast 模式下生效） */
+body:not(.swal2-toast-shown) .swal2-container.swal2-backdrop-show {
+  background: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+/* Toast 消息通知状态下：强制背景透明、无蒙板、穿透点击 */
+body.swal2-toast-shown .swal2-container {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  pointer-events: none !important;
+}
+
+/* 模态框主体 (排除 Toast 消息通知) */
+div.swal2-popup:not(.swal2-toast) {
+  border-radius: 1.25rem !important; /* 20px */
+  padding: 1.5rem !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(99, 102, 241, 0.05) !important;
+  font-family: inherit !important;
+  width: 22rem !important;
+  max-width: 90vw !important;
+}
+
+/* 标题 */
+h2.swal2-title {
+  font-size: 0.9375rem !important; /* 15px */
+  font-weight: 700 !important;
+  color: #0f172a !important; /* slate-900 */
+  padding: 0 !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.35rem !important;
+  line-height: 1.4 !important;
+}
+
+/* 内容正文 */
+div.swal2-html-container {
+  font-size: 0.75rem !important; /* 12px */
+  color: #64748b !important; /* slate-500 */
+  line-height: 1.5 !important;
+  margin: 0 !important;
+  padding: 0 0.5rem !important;
+}
+
+/* 输入框 */
+input.swal2-input {
+  height: 2.25rem !important;
+  border-radius: 0.75rem !important;
+  border: 1px solid #e2e8f0 !important;
+  background-color: #f8fafc !important;
+  font-size: 0.75rem !important;
+  color: #1e293b !important;
+  padding: 0 0.75rem !important;
+  margin: 1rem auto 0 !important;
+  width: 100% !important;
+  box-shadow: none !important;
+  transition: all 0.15s ease !important;
+  box-sizing: border-box !important;
+}
+
+input.swal2-input:focus {
+  border-color: #6366f1 !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
+  outline: none !important;
+}
+
+/* 按钮操作栏 */
+div.swal2-actions {
+  gap: 0.5rem !important;
+  margin-top: 1.25rem !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+}
+
+/* 确认按钮 */
+button.swal2-confirm {
+  border-radius: 0.75rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  padding: 0.45rem 1rem !important;
+  box-shadow: 0 1px 2px 0 rgba(79, 70, 229, 0.25) !important;
+  transition: all 0.15s ease !important;
+  cursor: pointer !important;
+  margin: 0 !important;
+}
+
+button.swal2-confirm:hover {
+  filter: brightness(0.95);
+  transform: translateY(-0.5px);
+}
+
+/* 取消按钮 */
+button.swal2-cancel {
+  border-radius: 0.75rem !important;
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  padding: 0.45rem 1rem !important;
+  box-shadow: none !important;
+  transition: all 0.15s ease !important;
+  cursor: pointer !important;
+  margin: 0 !important;
+}
+
+button.swal2-cancel:hover {
+  background-color: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+/* 图标精简紧凑化 */
+div.swal2-icon {
+  transform: scale(0.65) !important;
+  margin: 0.25rem auto 0 !important;
+  border-width: 3px !important;
+}
+
+div.swal2-icon.swal2-warning {
+  border-color: #f59e0b !important;
+  color: #f59e0b !important;
+}
+
+div.swal2-icon.swal2-info {
+  border-color: #6366f1 !important;
+  color: #6366f1 !important;
+}
+
+/* Toast 提示定制 (右侧悬浮轻提示) */
+div.swal2-popup.swal2-toast {
+  width: auto !important;
+  min-width: 14rem !important;
+  border-radius: 0.875rem !important; /* 14px */
+  padding: 0.65rem 1rem !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(226, 232, 240, 0.95) !important;
+  box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04) !important;
+  pointer-events: auto !important;
+}
+
+div.swal2-popup.swal2-toast h2.swal2-title {
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin: 0 !important;
+}
+
+div.swal2-popup.swal2-toast .swal2-icon {
+  transform: scale(0.6) !important;
+  margin: 0 0.5rem 0 0 !important;
+}
+
+/* Toast 进度条为品牌靛青色 */
+.swal2-timer-progress-bar {
+  background: #6366f1 !important;
+  height: 2.5px !important;
+}

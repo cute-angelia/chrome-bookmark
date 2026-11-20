@@ -1,7 +1,24 @@
 import { isChromeExtension } from './bookmarkStorage.js';
 
-function domainOf(url) {
+export function domainOf(url) {
   try { return new URL(url).hostname; } catch { return ''; }
+}
+
+export function normalizeBookmarkUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  try {
+    const parsed = new URL(url.trim());
+    const host = parsed.hostname.toLowerCase();
+    let pathname = parsed.pathname || '';
+    if (pathname === '/') {
+      pathname = '';
+    } else if (pathname.endsWith('/')) {
+      pathname = pathname.slice(0, -1);
+    }
+    return `${parsed.protocol}//${host}${parsed.port ? ':' + parsed.port : ''}${pathname}${parsed.search}`;
+  } catch {
+    return url.trim().replace(/\/+$/, '');
+  }
 }
 
 export async function readChromeLibrary() {
@@ -41,7 +58,16 @@ export function normalizeRemoteBookmarks(records, server) {
   server = server.replace(/\/+$/, '');
   return records.filter(record => record.url).map(record => {
     let screenshot = '';
-    try { screenshot = record.imageURL ? new URL(record.imageURL, `${server}/`).href : ''; } catch { /* No valid image. */ }
+    try {
+      if (record.imageURL) {
+        const fullUrl = new URL(record.imageURL, `${server}/`);
+        const pathSegments = fullUrl.pathname.split('/').filter(Boolean);
+        const lastSegment = pathSegments.at(-1) || '';
+        if (lastSegment && !['bookmark', 'minio'].includes(lastSegment.toLowerCase())) {
+          screenshot = fullUrl.href;
+        }
+      }
+    } catch { /* No valid image. */ }
     const tags = record.tags_detail ?? record.tags ?? [];
     return {
       id: `remote:${server}:${record.id}`, remoteId: record.id, source: 'remote', server,
@@ -54,15 +80,149 @@ export function normalizeRemoteBookmarks(records, server) {
   });
 }
 
+export function aggregateBookmarksByUrl(bookmarks) {
+  if (!Array.isArray(bookmarks) || bookmarks.length === 0) return [];
+
+  const map = new Map();
+  const noUrlList = [];
+
+  for (const bm of bookmarks) {
+    if (!bm) continue;
+    const norm = normalizeBookmarkUrl(bm.url);
+    if (!norm) {
+      noUrlList.push(bm);
+      continue;
+    }
+    if (!map.has(norm)) {
+      map.set(norm, []);
+    }
+    map.get(norm).push(bm);
+  }
+
+  const result = [];
+
+  for (const [normUrl, items] of map.entries()) {
+    if (items.length === 1) {
+      const item = items[0];
+      const isNative = item.source === 'chrome' || !!item.nativeId;
+      const isRemote = item.source === 'remote' || !!item.remoteId;
+      const sources = Array.from(new Set([
+        ...(item.sources || []),
+        ...(isNative ? ['chrome'] : []),
+        ...(isRemote ? ['remote'] : [])
+      ]));
+      result.push({
+        ...item,
+        sources,
+        isNative,
+        isRemote
+      });
+      continue;
+    }
+
+    // 多源聚合：将 Chrome、远程以及本地孤立记录融合成单条复合书签
+    const chromeItem = items.find(b => b.source === 'chrome' || (b.id && b.id.startsWith('chrome:')));
+    const remoteItem = items.find(b => b.source === 'remote' || (b.id && b.id.startsWith('remote:')) || b.remoteId);
+    const localItem = items.find(b => !b.source || (b.source !== 'chrome' && b.source !== 'remote'));
+
+    const primary = chromeItem || remoteItem || localItem || items[0];
+
+    // 标签多端并集去重
+    const allTags = new Set();
+    items.forEach(b => {
+      if (Array.isArray(b.tags)) b.tags.forEach(t => t && allTags.add(t));
+    });
+
+    // 截图优先使用本地高清快照，其次回退远程图片
+    let bestScreenshot = '';
+    for (const b of items) {
+      if (b.screenshot) {
+        if (!bestScreenshot || b.screenshot.startsWith('data:')) {
+          bestScreenshot = b.screenshot;
+        }
+      }
+    }
+
+    const bestNotes = items.map(b => b.notes).find(n => n && n.trim()) || '';
+    const maxVisits = Math.max(...items.map(b => b.visits || 0), 0);
+    const isPinned = items.some(b => b.pinned);
+    const dateAdded = items.map(b => b.dateAdded).find(d => typeof d === 'number' && d > 0) || Date.now();
+
+    const nativeId = chromeItem?.nativeId || items.find(b => b.nativeId)?.nativeId;
+    const remoteId = remoteItem?.remoteId || items.find(b => b.remoteId)?.remoteId;
+    const server = remoteItem?.server || items.find(b => b.server)?.server;
+    const remoteFolderId = remoteItem?.folderId || (server ? `remote:${server}` : '');
+
+    const isNative = !!nativeId || items.some(b => b.source === 'chrome');
+    const isRemote = !!remoteId || items.some(b => b.source === 'remote');
+    const sources = Array.from(new Set([
+      ...items.flatMap(b => b.sources || []),
+      ...(isNative ? ['chrome'] : []),
+      ...(isRemote ? ['remote'] : [])
+    ]));
+
+    const folder = chromeItem?.folder || localItem?.folder || remoteItem?.folder || primary.folder;
+    const folderId = chromeItem?.folderId || localItem?.folderId || remoteItem?.folderId || primary.folderId;
+    const ancestorIds = chromeItem?.ancestorIds || localItem?.ancestorIds || remoteItem?.ancestorIds || primary.ancestorIds || [];
+
+    result.push({
+      ...primary,
+      id: primary.id,
+      url: primary.url || normUrl,
+      title: chromeItem?.title || localItem?.title || remoteItem?.title || primary.title,
+      domain: primary.domain || domainOf(primary.url || normUrl),
+      nativeId,
+      remoteId,
+      server,
+      remoteFolderId,
+      isNative,
+      isRemote,
+      sources,
+      folder,
+      folderId,
+      ancestorIds,
+      screenshot: bestScreenshot,
+      tags: Array.from(allTags),
+      notes: bestNotes,
+      pinned: isPinned,
+      visits: maxVisits,
+      dateAdded
+    });
+  }
+
+  return [...result, ...noUrlList];
+}
+
 export function mergeLibraryBookmarks(stored, incoming) {
-  const previous = new Map(stored.map(bookmark => [bookmark.id, bookmark]));
+  const previousById = new Map();
+  const previousByUrl = new Map();
+  const previousByRemote = new Map();
+  const previousByNative = new Map();
+
+  for (const bookmark of stored) {
+    if (bookmark.id) previousById.set(bookmark.id, bookmark);
+    const norm = normalizeBookmarkUrl(bookmark.url);
+    if (norm) previousByUrl.set(norm, bookmark);
+    if (bookmark.remoteId != null) previousByRemote.set(String(bookmark.remoteId), bookmark);
+    if (bookmark.nativeId != null) previousByNative.set(String(bookmark.nativeId), bookmark);
+  }
+
   return [...stored.filter(bookmark => !['chrome', 'remote'].includes(bookmark.source)), ...incoming.map(bookmark => {
-    const old = previous.get(bookmark.id);
+    const norm = normalizeBookmarkUrl(bookmark.url);
+    const old = previousById.get(bookmark.id) ||
+      (bookmark.remoteId != null ? previousByRemote.get(String(bookmark.remoteId)) : null) ||
+      (bookmark.nativeId != null ? previousByNative.get(String(bookmark.nativeId)) : null) ||
+      (norm ? previousByUrl.get(norm) : null);
+
     if (!old) return bookmark;
     // Source fields stay authoritative; workspace-only annotations survive refreshes.
-    return { ...bookmark, ...Object.fromEntries(['pinned', 'visits', 'notes', 'tags', 'screenshot', 'nativeFolderId', ...(bookmark.source === 'remote' ? ['nativeId'] : [])]
-      .filter(key => old[key] !== undefined && (old[key] !== '' || bookmark[key] === ''))
-      .map(key => [key, old[key]])) };
+    // For remote bookmarks with an upstream image, let incoming screenshot take precedence.
+    const preservedKeys = ['pinned', 'visits', 'notes', 'tags', ...(bookmark.source === 'remote' ? ['nativeId'] : ['screenshot']), 'nativeFolderId']
+      .filter(key => old[key] !== undefined && (old[key] !== '' || bookmark[key] === ''));
+    if (bookmark.source === 'remote' && !bookmark.screenshot && old.screenshot) {
+      preservedKeys.push('screenshot');
+    }
+    return { ...bookmark, ...Object.fromEntries(preservedKeys.map(key => [key, old[key]])) };
   })].sort((a, b) => sourceRank(a) - sourceRank(b));
 }
 

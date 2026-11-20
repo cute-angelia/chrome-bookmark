@@ -3,9 +3,7 @@
     <!-- Popup Header -->
     <div class="flex items-center justify-between pb-3 border-b border-slate-200">
       <div class="flex items-center space-x-2">
-        <div class="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-xs">
-          <Camera class="w-4 h-4" />
-        </div>
+        <img src="/icons/icon.svg" alt="CutBookmark Logo" class="w-7 h-7 rounded-lg shadow-xs shrink-0" />
         <div>
           <h1 class="text-xs font-bold text-slate-900 leading-none">截屏书签 CutBookmark</h1>
           <div class="flex items-center space-x-1 mt-0.5">
@@ -103,14 +101,16 @@
         <div class="flex items-center space-x-1.5">
           <Folder class="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <select
-            v-model="selectedFolder"
-            class="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            v-model="selectedFolderId"
+            class="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 truncate"
           >
-            <option value="前端技术/Vue生态">📂 前端技术 / Vue生态</option>
-            <option value="前端技术/样式设计">📂 前端技术 / 样式设计</option>
-            <option value="开源项目/构建工具">📂 开源项目 / 构建工具</option>
-            <option value="设计灵感/UI界面">📂 设计灵感 / UI界面</option>
-            <option value="常用收集箱">📂 常用收集箱 (默认)</option>
+            <option
+              v-for="folder in folderOptions"
+              :key="folder.id"
+              :value="folder.id"
+            >
+              📂 {{ folder.path || folder.name }}
+            </option>
           </select>
         </div>
 
@@ -121,6 +121,7 @@
             <input
               v-model="tagsInputText"
               @keydown.enter.prevent="addCustomTag"
+              @blur="addCustomTag"
               placeholder="添加标签以逗号或回车分隔..."
               class="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
@@ -148,7 +149,7 @@
         class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 shadow-sm shadow-indigo-200 transition cursor-pointer"
       >
         <BookmarkCheck class="w-4 h-4" />
-        <span>{{ isSaving ? '同步保存中...' : (isCurrentBookmarked ? '覆盖更新快照与标签' : '保存为截屏书签') }}</span>
+        <span>{{ isSaving ? (isCapturing ? '生成快照并保存中...' : '同步保存中...') : (isCurrentBookmarked ? '覆盖更新快照与标签' : '保存为截屏书签') }}</span>
       </button>
 
       <button
@@ -169,19 +170,21 @@ import {
   ExternalLink, CheckCircle2
 } from 'lucide-vue-next';
 import { getCurrentPageInfo, captureCurrentTab } from '../services/bookmarkService.js';
-import { getStoredBookmarks, saveStoredBookmarks, showToast } from '../services/bookmarkStorage.js';
+import { isChromeExtension, getStoredBookmarks, saveStoredBookmarks, getStoredFolders, showToast } from '../services/bookmarkStorage.js';
 import { getServerConfig, remoteAddBookmark, remoteDeleteBookmark, openRemoteLibraries } from '../services/shioriApi.js';
 import {
   saveToShioriFolder, removeFromShioriFolder, checkUrlInShioriFolder,
-  setExtensionBookmarkIcon
+  findNativeBookmarkMatches, setExtensionBookmarkIcon
 } from '../services/nativeBookmarkSync.js';
+import { readChromeLibrary, normalizeBookmarkUrl, aggregateBookmarksByUrl } from '../services/bookmarkLibrary.js';
 
 const pageTitle = ref('');
 const pageUrl = ref('');
 const screenshotUrl = ref('');
 const screenshotError = ref('');
-const selectedFolder = ref('常用收集箱');
-const selectedTags = ref(['开发']);
+const folderOptions = ref([]);
+const selectedFolderId = ref('');
+const selectedTags = ref([]);
 const tagsInputText = ref('');
 
 const isCapturing = ref(false);
@@ -201,26 +204,98 @@ async function initPage() {
   pageTitle.value = info.title;
   pageUrl.value = info.url;
 
-  // 检查当前 URL 是否已在书签库
-  isCurrentBookmarked.value = await checkUrlInShioriFolder(info.url);
-  if (!isCurrentBookmarked.value) {
-    const list = await getStoredBookmarks();
-    isCurrentBookmarked.value = list.some(b => b.url === info.url);
+  // 1. 动态加载真实 Chrome 书签目录树
+  if (isChromeExtension()) {
+    try {
+      const { folders } = await readChromeLibrary();
+      if (folders && folders.length > 0) {
+        folderOptions.value = folders.map(f => ({
+          id: f.id,
+          name: f.name,
+          path: f.path || f.name,
+          depth: f.depth || 0
+        }));
+      }
+    } catch (e) {
+      console.warn('读取 Chrome 原生目录失败:', e);
+    }
   }
+
+  // 2. 若未获取到原生目录（如 Web 预览环境），加载本地已有分类
+  if (folderOptions.value.length === 0) {
+    const storedFolders = await getStoredFolders();
+    folderOptions.value = storedFolders.filter(f => f.id !== 'all').map(f => ({
+      id: f.id,
+      name: f.name,
+      path: f.name,
+      depth: 0
+    }));
+  }
+
+  // 3. 兜底默认分类选项
+  if (folderOptions.value.length === 0) {
+    folderOptions.value = [
+      { id: 'chrome:2', name: '其他书签', path: '其他书签', depth: 0 }
+    ];
+  }
+
+  // 4. 检查当前 URL 是否已在书签库
+  isCurrentBookmarked.value = await checkUrlInShioriFolder(info.url);
+  const normUrl = normalizeBookmarkUrl(info.url);
+  const list = await getStoredBookmarks();
+  const existing = list.find(b => normalizeBookmarkUrl(b.url) === normUrl);
+
+  if (existing) {
+    isCurrentBookmarked.value = true;
+    if (Array.isArray(existing.tags)) {
+      selectedTags.value = [...existing.tags];
+    }
+    if (existing.folderId && folderOptions.value.some(f => f.id === existing.folderId)) {
+      selectedFolderId.value = existing.folderId;
+    }
+    if (existing.screenshot) {
+      screenshotUrl.value = existing.screenshot;
+    }
+  }
+
+  // 5. 若未匹配到已有归属文件夹，定位本机匹配或常用默认位置
+  if (!selectedFolderId.value) {
+    const nativeMatches = await findNativeBookmarkMatches({ url: info.url });
+    if (nativeMatches && nativeMatches.length > 0) {
+      isCurrentBookmarked.value = true;
+      selectedFolderId.value = `chrome:${nativeMatches[0].parentId}`;
+    } else {
+      const defaultCutBookmark = folderOptions.value.find(f => f.name === 'CutBookmark' || f.name === 'Shiori');
+      if (defaultCutBookmark) {
+        selectedFolderId.value = defaultCutBookmark.id;
+      } else {
+        const otherBookmarks = folderOptions.value.find(f => f.name === '其他书签');
+        selectedFolderId.value = otherBookmarks ? otherBookmarks.id : folderOptions.value[0]?.id;
+      }
+    }
+  }
+
   setExtensionBookmarkIcon(isCurrentBookmarked.value);
 
-  await takeScreenshot();
+  if (!screenshotUrl.value) {
+    await takeScreenshot();
+  }
 }
+
+let pendingCapture = null;
 
 async function takeScreenshot() {
   isCapturing.value = true;
   screenshotError.value = '';
   try {
-    screenshotUrl.value = await captureCurrentTab();
+    pendingCapture = captureCurrentTab();
+    screenshotUrl.value = await pendingCapture;
   } catch (error) {
     screenshotError.value = error.message || '截图失败，请重试';
+    screenshotUrl.value = '';
   } finally {
     isCapturing.value = false;
+    pendingCapture = null;
   }
 }
 
@@ -240,22 +315,61 @@ function removeTag(tag) {
 }
 
 async function saveBookmark() {
+  if (isSaving.value) return;
+  // 确保输入框内未按回车提交的标签被自动收录
+  addCustomTag();
   isSaving.value = true;
   try {
+    // 1. 如果截图仍在捕获中，先等待捕获完成
+    if (isCapturing.value && pendingCapture) {
+      try {
+        await pendingCapture;
+      } catch {
+        // 捕获异常已在 takeScreenshot 记录
+      }
+    }
+
+    // 2. 如果此前未获取到截图，进行一次现场主动兜底截屏
+    if (!screenshotUrl.value) {
+      try {
+        screenshotUrl.value = await captureCurrentTab();
+      } catch (err) {
+        console.warn('现场截图兜底失败:', err);
+      }
+    }
+
     let domain = 'example.com';
     try {
       domain = new URL(pageUrl.value || 'https://example.com').hostname;
-    } catch (e) {
-      //
+    } catch {}
+
+    // 3. 同步保存到 Chrome 原生书签对应文件夹
+    let nativeNode = null;
+    let targetParentId = selectedFolderId.value;
+    if (targetParentId && typeof targetParentId === 'string' && targetParentId.startsWith('chrome:')) {
+      targetParentId = targetParentId.slice('chrome:'.length);
+    }
+    if (isChromeExtension()) {
+      nativeNode = await saveToShioriFolder(pageUrl.value, pageTitle.value, targetParentId);
+      setExtensionBookmarkIcon(true);
+      isCurrentBookmarked.value = true;
     }
 
+    // 4. 将快照、标签、笔记等元数据存入 IndexedDB（复用原生 ID，不生成脱节的「常用收集箱」条目）
+    const selectedOpt = folderOptions.value.find(f => f.id === selectedFolderId.value);
+    const folderPath = selectedOpt?.path || selectedOpt?.name || '其他书签';
+    const folderId = selectedFolderId.value || (nativeNode ? `chrome:${nativeNode.parentId}` : 'default');
+
     const newBm = {
-      id: `bm-${Date.now()}`,
+      id: nativeNode ? `chrome:${nativeNode.id}` : `bm-${Date.now()}`,
+      nativeId: nativeNode?.id || undefined,
+      source: nativeNode ? 'chrome' : undefined,
       title: pageTitle.value || '未命名书签',
       url: pageUrl.value || 'https://example.com',
       domain,
-      folder: selectedFolder.value,
-      folderId: 'folder-custom',
+      folder: folderPath,
+      folderId,
+      ancestorIds: [folderId],
       tags: [...selectedTags.value],
       screenshot: screenshotUrl.value,
       color: '#6366f1',
@@ -265,22 +379,29 @@ async function saveBookmark() {
       visits: 1
     };
 
-    // 1. 同步保存到工作台持久化存储
+    const normUrl = normalizeBookmarkUrl(pageUrl.value);
     const list = await getStoredBookmarks();
-    const existingIdx = list.findIndex(b => b.url === pageUrl.value);
+    const existingIdx = list.findIndex(b => normalizeBookmarkUrl(b.url) === normUrl);
     if (existingIdx >= 0) {
-      list[existingIdx] = Object.assign({}, list[existingIdx], newBm);
+      list[existingIdx] = Object.assign({}, list[existingIdx], newBm, {
+        id: nativeNode ? `chrome:${nativeNode.id}` : list[existingIdx].id,
+        visits: list[existingIdx].visits || 1,
+        pinned: list[existingIdx].pinned || false
+      });
     } else {
       list.unshift(newBm);
     }
-    await saveStoredBookmarks(list);
+    await saveStoredBookmarks(aggregateBookmarksByUrl(list));
 
-    // 2. 同步保存到 Chrome 原生 Shiori 文件夹
-    await saveToShioriFolder(pageUrl.value, pageTitle.value);
-    setExtensionBookmarkIcon(true);
-    isCurrentBookmarked.value = true;
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({ type: 'BOOKMARK_UPDATED', url: pageUrl.value });
+      } catch (e) {
+        // ignore
+      }
+    }
 
-    // 3. 同步向远程自建服务 POST /api/bookmarks/add 提交
+    // 5. 同步向远程自建服务 POST /api/bookmarks/add 提交
     if (isServerConnected.value) {
       const remoteRes = await remoteAddBookmark({
         url: pageUrl.value,
@@ -289,12 +410,12 @@ async function saveBookmark() {
         imgbase64: screenshotUrl.value
       });
       if (remoteRes.success) {
-        showToast('已同步保存至远程服务与本地！');
+        showToast(screenshotUrl.value ? '已同步保存至远程服务与本地！' : '书签已同步（未获取到网页截图）');
       } else {
         showToast('已保存至本地 (远程同步未成功)', 'warning');
       }
     } else {
-      showToast(screenshotUrl.value ? '书签与快照已保存至本地工作台！' : '书签已保存（未生成截图）');
+      showToast(screenshotUrl.value ? '书签与快照已保存至本地！' : '书签已保存（未生成截图）');
     }
 
     setTimeout(() => {
@@ -310,12 +431,13 @@ async function saveBookmark() {
 async function handleRemoveBookmark() {
   isRemoving.value = true;
   try {
-    // 1. 本地原生 Shiori 文件夹移除
+    // 1. 本地原生书签文件夹移除
     await removeFromShioriFolder(pageUrl.value);
 
-    // 2. 工作台存储移除
+    // 2. 工作台存储移除所有该 URL 的记录（包括存量历史孤立记录）
+    const normUrl = normalizeBookmarkUrl(pageUrl.value);
     const list = await getStoredBookmarks();
-    const updated = list.filter(b => b.url !== pageUrl.value);
+    const updated = list.filter(b => normalizeBookmarkUrl(b.url) !== normUrl);
     await saveStoredBookmarks(updated);
 
     // 3. 远程服务器删除
