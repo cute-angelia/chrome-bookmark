@@ -89,14 +89,16 @@ test('setExtensionBookmarkIcon switches icon path, badge and title between bookm
     }
   };
 
-  // 1. 已收藏：设置为紫罗兰靶心勾选图标 + 已收藏提示
+  // 1. 已收藏：设置为紫罗兰靶心勾选图标 + ★ 五角星 Badge + 已收藏提示
   sync.setExtensionBookmarkIcon(true, 123);
   assert.equal(iconDetails.tabId, 123);
   assert.equal(iconDetails.path[16], 'icons/action-bookmarked-16.png');
+  assert.equal(badgeDetails.text, '★');
   assert.equal(titleDetails.title.includes('已收藏'), true);
 
-  // 2. 未收藏：设置为默认图标
+  // 2. 未收藏：设置为默认图标 + 清空 Badge
   sync.setExtensionBookmarkIcon(false, 123);
   assert.equal(iconDetails.path[16], 'icons/action-default-16.png');
+  assert.equal(badgeDetails.text, '');
   assert.equal(titleDetails.title.includes('添加'), true);
 });

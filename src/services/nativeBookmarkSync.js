@@ -199,17 +199,25 @@ export function setExtensionBookmarkIcon(isBookmarked, tabId = null) {
       };
 
   const iconDetails = { path: iconPath };
-  const badgeDetails = { text: '' };
+  const badgeDetails = { text: isBookmarked ? '★' : '' };
+  const badgeColorDetails = { color: '#4f46e5' };
   const titleDetails = { title: isBookmarked ? '已收藏至书签 (截屏书签)' : '添加截屏书签' };
 
   if (typeof tabId === 'number') {
     iconDetails.tabId = tabId;
     badgeDetails.tabId = tabId;
+    badgeColorDetails.tabId = tabId;
     titleDetails.tabId = tabId;
   }
 
   if (chrome.action.setIcon) {
     chrome.action.setIcon(iconDetails, () => {
+      if (chrome.runtime?.lastError) { /* ignore */ }
+    });
+  }
+
+  if (chrome.action.setBadgeBackgroundColor && isBookmarked) {
+    chrome.action.setBadgeBackgroundColor(badgeColorDetails, () => {
       if (chrome.runtime?.lastError) { /* ignore */ }
     });
   }
