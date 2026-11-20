@@ -1,4 +1,5 @@
-import { isChromeExtension } from './bookmarkStorage.js';
+import { isChromeExtension, getStoredBookmarks } from './bookmarkStorage.js';
+import { normalizeBookmarkUrl } from './bookmarkLibrary.js';
 
 const DEFAULT_FOLDER_NAME = 'CutBookmark';
 
@@ -128,27 +129,62 @@ export async function removeFromShioriFolder(url, specificId = null) {
 }
 
 /**
- * 检查指定 URL 是否已被收藏进原生书签文件夹
+ * 全面检查指定 URL 是否已被收藏（涵盖 Chrome 原生书签任意目录以及本地存储库）
  */
-export async function checkUrlInShioriFolder(url) {
-  if (!isChromeExtension() || !url) return false;
+export async function checkUrlBookmarked(url) {
+  if (!url) return false;
+  const normTarget = normalizeBookmarkUrl(url);
+  if (!normTarget) return false;
 
-  const folder = await findShioriFolder();
-  if (!folder) return false;
+  // 1. 在 Chrome 原生书签树中全面检索
+  if (isChromeExtension() && chrome.bookmarks?.search) {
+    try {
+      const results = await new Promise((resolve) => {
+        chrome.bookmarks.search({ url }, (items) => {
+          if (chrome.runtime?.lastError) resolve([]);
+          else resolve(items || []);
+        });
+      });
+      if (results && results.length > 0) return true;
 
-  return new Promise((resolve) => {
-    chrome.bookmarks.search({ url }, (existing) => {
-      const isFound = (existing || []).some(b => b.parentId === folder.id);
-      resolve(isFound);
-    });
-  });
+      // 若带参数或尾部斜杠，用规范化 URL 再次匹配
+      if (normTarget !== url) {
+        const normResults = await new Promise((resolve) => {
+          chrome.bookmarks.search({ url: normTarget }, (items) => {
+            if (chrome.runtime?.lastError) resolve([]);
+            else resolve(items || []);
+          });
+        });
+        if (normResults && normResults.length > 0) return true;
+      }
+    } catch (e) {
+      // 忽略 search 异常
+    }
+  }
+
+  // 2. 在本地 IndexedDB 存储的书签库中检索（涵盖远程书签与本地快照）
+  try {
+    const stored = await getStoredBookmarks();
+    if (stored && stored.length > 0) {
+      if (stored.some(b => normalizeBookmarkUrl(b.url) === normTarget)) {
+        return true;
+      }
+    }
+  } catch (e) {
+    // 忽略存储异常
+  }
+
+  return false;
 }
 
+// 保持向后兼容
+export const checkUrlInShioriFolder = checkUrlBookmarked;
+
 /**
- * 根据是否已收藏动态设置扩展图标
+ * 根据是否已收藏动态设置扩展图标及 Badge / Title 视觉反馈
  */
-export function setExtensionBookmarkIcon(isBookmarked) {
-  if (!isChromeExtension() || !chrome.action || !chrome.action.setIcon) return;
+export function setExtensionBookmarkIcon(isBookmarked, tabId = null) {
+  if (!isChromeExtension() || !chrome.action) return;
 
   const iconPath = isBookmarked
     ? {
@@ -162,11 +198,33 @@ export function setExtensionBookmarkIcon(isBookmarked) {
         64: 'icons/action-default-64.png'
       };
 
-  chrome.action.setIcon({ path: iconPath }, () => {
-    if (chrome.runtime.lastError) {
-      // 忽略图标设置异常
-    }
-  });
+  const iconDetails = { path: iconPath };
+  const badgeDetails = { text: '' };
+  const titleDetails = { title: isBookmarked ? '已收藏至书签 (截屏书签)' : '添加截屏书签' };
+
+  if (typeof tabId === 'number') {
+    iconDetails.tabId = tabId;
+    badgeDetails.tabId = tabId;
+    titleDetails.tabId = tabId;
+  }
+
+  if (chrome.action.setIcon) {
+    chrome.action.setIcon(iconDetails, () => {
+      if (chrome.runtime?.lastError) { /* ignore */ }
+    });
+  }
+
+  if (chrome.action.setBadgeText) {
+    chrome.action.setBadgeText(badgeDetails, () => {
+      if (chrome.runtime?.lastError) { /* ignore */ }
+    });
+  }
+
+  if (chrome.action.setTitle) {
+    chrome.action.setTitle(titleDetails, () => {
+      if (chrome.runtime?.lastError) { /* ignore */ }
+    });
+  }
 }
 
 /**
@@ -177,11 +235,11 @@ export async function refreshActiveTabIcon() {
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.url && !tab.url.startsWith('chrome://')) {
-      const isBookmarked = await checkUrlInShioriFolder(tab.url);
-      setExtensionBookmarkIcon(isBookmarked);
-    } else {
-      setExtensionBookmarkIcon(false);
+    if (tab && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
+      const isBookmarked = await checkUrlBookmarked(tab.url);
+      setExtensionBookmarkIcon(isBookmarked, tab.id);
+    } else if (tab) {
+      setExtensionBookmarkIcon(false, tab.id);
     }
   } catch (e) {
     //

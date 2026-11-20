@@ -70,7 +70,17 @@
         <!-- 分类文件夹树 -->
         <div>
           <div class="px-2 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-            <span>分类文件夹</span>
+            <button
+              @click="isFolderSectionCollapsed = !isFolderSectionCollapsed"
+              class="flex items-center space-x-1 hover:text-slate-700 transition cursor-pointer select-none"
+              title="点击展开/收起分类文件夹"
+            >
+              <ChevronDown
+                class="w-3 h-3 transition-transform duration-200"
+                :class="{ '-rotate-90': isFolderSectionCollapsed }"
+              />
+              <span>分类文件夹</span>
+            </button>
             <div class="flex items-center space-x-2">
               <button
                 v-if="selectedFolderFilter"
@@ -87,7 +97,7 @@
               </button>
             </div>
           </div>
-          <nav class="space-y-0.5">
+          <nav v-show="!isFolderSectionCollapsed" class="space-y-0.5">
             <!-- 全部文件夹 / 清除筛选入口 -->
             <button
               @click="selectFolder('')"
@@ -107,27 +117,47 @@
             </button>
 
             <button
-              v-for="folder in customFolders"
+              v-for="folder in visibleCustomFolders"
               :key="folder.id"
+              draggable="true"
+              @dragstart="handleFolderDragStart($event, folder)"
+              @dragend="handleFolderDragEnd"
               @click="selectFolder(folder.id)"
               @contextmenu.prevent="openFolderContextMenu($event, folder)"
               @dragover.prevent="handleFolderDragOver($event, folder)"
               @dragleave="handleFolderDragLeave($event, folder)"
               @drop.prevent="handleFolderDrop($event, folder)"
-              :style="{ paddingLeft: `${12 + (folder.depth || 0) * 12}px` }"
-              :title="`${folder.path || folder.name} (右键可新建、重命名或删除)`"
-              class="w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer relative"
+              :style="{ paddingLeft: `${8 + (folder.depth || 0) * 12}px` }"
+              :title="`${folder.path || folder.name} (可拖动排序，右键可操作)`"
+              class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium transition cursor-grab active:cursor-grabbing relative group select-none"
               :class="[
+                draggedFolderId === folder.id ? 'opacity-40 scale-[0.98] border-dashed border-indigo-400 bg-indigo-50/50' : '',
+                dragOverFolderSortTarget?.id === folder.id && dragOverFolderSortTarget.position === 'before' ? 'before:absolute before:top-0 before:left-2 before:right-2 before:h-0.5 before:bg-indigo-600 before:rounded-full before:z-10 bg-indigo-50/40' : '',
+                dragOverFolderSortTarget?.id === folder.id && dragOverFolderSortTarget.position === 'after' ? 'after:absolute after:bottom-0 after:left-2 after:right-2 after:h-0.5 after:bg-indigo-600 after:rounded-full after:z-10 bg-indigo-50/40' : '',
                 dragOverFolderId === folder.id ? '!bg-indigo-100 !text-indigo-800 ring-2 ring-indigo-500 ring-inset shadow-sm scale-[1.02]' : '',
                 selectedFolderFilter === folder.id ? 'bg-indigo-50 text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               ]"
             >
-              <div class="flex items-center space-x-2 truncate">
+              <div class="flex items-center space-x-1 truncate">
+                <!-- 折叠/展开小箭头（若有子文件夹显示小箭头，无子文件夹显示占位） -->
+                <span
+                  v-if="parentFolderIds.has(folder.id)"
+                  @click.stop="toggleFolderCollapse(folder.id, $event)"
+                  class="w-3.5 h-3.5 flex items-center justify-center text-slate-400 hover:text-slate-600 shrink-0 cursor-pointer rounded"
+                  :title="collapsedFolderIds.has(folder.id) ? '展开子文件夹' : '收起子文件夹'"
+                >
+                  <ChevronRight
+                    class="w-3 h-3 transition-transform duration-150"
+                    :class="{ 'rotate-90': !collapsedFolderIds.has(folder.id) }"
+                  />
+                </span>
+                <span v-else class="w-3.5 h-3.5 shrink-0"></span>
+
                 <Folder class="w-3.5 h-3.5 shrink-0 text-slate-400" :class="{ '!text-indigo-600': selectedFolderFilter === folder.id || dragOverFolderId === folder.id }" />
                 <span class="truncate">{{ folder.name }}</span>
               </div>
               <span
-                class="text-[10px] px-1.5 py-0.2 rounded-full font-mono"
+                class="text-[10px] px-1.5 py-0.2 rounded-full font-mono shrink-0 ml-1"
                 :class="selectedFolderFilter === folder.id ? 'bg-white text-indigo-700' : 'bg-slate-100 text-slate-500'"
               >
                 {{ getFolderBookmarkCount(folder) }}
@@ -287,6 +317,7 @@
         <div
           v-for="bm in filteredList"
           :key="bm.id"
+          :data-bookmark-id="bm.id"
           draggable="true"
           @dragstart="handleBookmarkDragStart($event, bm)"
           @dragend="handleBookmarkDragEnd"
@@ -600,13 +631,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import Swal from 'sweetalert2';
 import {
   Camera, Plus, Folder, Search, List, Pin, ExternalLink, Trash2,
   FolderPlus, Pencil,
   RotateCw, Download, Upload, FolderArchive,
-  Star, Image, Clock, Flame, CloudUpload
+  Star, Image, Clock, Flame, CloudUpload,
+  ChevronDown, ChevronRight
 } from 'lucide-vue-next';
 import CreateBookmarkModal from '../components/CreateBookmarkModal.vue';
 import FolderManageModal from '../components/FolderManageModal.vue';
@@ -661,6 +693,8 @@ const selectedBatchIds = ref([]);
 
 const draggedBookmarkId = ref(null);
 const dragOverFolderId = ref(null);
+const draggedFolderId = ref(null);
+const dragOverFolderSortTarget = ref(null);
 
 const selectedBookmarkId = ref(null);
 const newTagInput = ref('');
@@ -681,6 +715,66 @@ const smartViews = computed(() => [
 const customFolders = computed(() => {
   return folders.value.filter(f => f.id !== 'all');
 });
+
+// 控制整个“分类文件夹”板块的展开/收缩
+const isFolderSectionCollapsed = ref(false);
+
+// 记录哪些父文件夹被用户手动收缩折叠了子文件夹
+const collapsedFolderIds = ref(new Set());
+
+// 具有子文件夹的父文件夹 ID 集合
+const parentFolderIds = computed(() => {
+  const set = new Set();
+  customFolders.value.forEach(f => {
+    if (f.parentId) set.add(f.parentId);
+  });
+  return set;
+});
+
+// 计算可见的文件夹列表（若其任意层级的父级被收缩，则不显示）
+const visibleCustomFolders = computed(() => {
+  const folderMap = new Map(customFolders.value.map(f => [f.id, f]));
+  return customFolders.value.filter(folder => {
+    let curr = folder;
+    while (curr?.parentId) {
+      if (collapsedFolderIds.value.has(curr.parentId)) {
+        return false;
+      }
+      curr = folderMap.get(curr.parentId);
+    }
+    return true;
+  });
+});
+
+function toggleFolderCollapse(folderId, event) {
+  if (event) event.stopPropagation();
+  const next = new Set(collapsedFolderIds.value);
+  if (next.has(folderId)) {
+    next.delete(folderId);
+  } else {
+    next.add(folderId);
+  }
+  collapsedFolderIds.value = next;
+}
+
+function expandFolderAncestors(folderId) {
+  if (!folderId) return;
+  const folderMap = new Map(customFolders.value.map(f => [f.id, f]));
+  let curr = folderMap.get(folderId);
+  if (!curr?.parentId) return;
+  const next = new Set(collapsedFolderIds.value);
+  let changed = false;
+  while (curr?.parentId) {
+    if (next.has(curr.parentId)) {
+      next.delete(curr.parentId);
+      changed = true;
+    }
+    curr = folderMap.get(curr.parentId);
+  }
+  if (changed) {
+    collapsedFolderIds.value = next;
+  }
+}
 
 const allUniqueTags = computed(() => {
   const set = new Set();
@@ -739,6 +833,7 @@ function selectFolder(folderId) {
     activeView.value = 'all';
     // 切换文件夹时清空标签筛选，保持干净的文件夹视图
     selectedTagFilter.value = '';
+    expandFolderAncestors(folderId);
   }
 }
 
@@ -817,6 +912,76 @@ const filteredList = computed(() => {
 function selectBookmark(id) {
   selectedBookmarkId.value = id;
 }
+
+let pendingTargetUrl = '';
+
+async function focusBookmarkByUrl(targetUrl) {
+  if (!targetUrl) return false;
+  const norm = normalizeBookmarkUrl(targetUrl);
+
+  let found = bookmarks.value.find(b => {
+    if (!b?.url) return false;
+    return normalizeBookmarkUrl(b.url) === norm || b.url === targetUrl;
+  });
+
+  // 如果在当前内存中未命中，尝试从本地 IndexedDB 重新读取一次（应对并发新增场景）
+  if (!found) {
+    try {
+      const stored = await getStoredBookmarks();
+      if (stored && stored.length > 0) {
+        bookmarks.value = reconcileRecords(bookmarks.value, aggregateBookmarksByUrl(stored));
+        found = bookmarks.value.find(b => {
+          if (!b?.url) return false;
+          return normalizeBookmarkUrl(b.url) === norm || b.url === targetUrl;
+        });
+      }
+    } catch {}
+  }
+
+  if (found) {
+    // 1. 清除阻碍列表项展示的筛选限制
+    selectedFolderFilter.value = '';
+    selectedTagFilter.value = '';
+    searchQuery.value = '';
+    activeView.value = 'all';
+
+    // 2. 展开分类文件夹大板块，并展开所属各级父文件夹
+    isFolderSectionCollapsed.value = false;
+    if (found.folderId) {
+      expandFolderAncestors(found.folderId);
+    }
+
+    // 3. 选中该书签 ID
+    selectedBookmarkId.value = found.id;
+
+    // 4. 平滑滚动到当前书签可见
+    const scrollTarget = () => {
+      const escapedId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(found.id) : found.id.replace(/"/g, '\\"');
+      const el = document.querySelector(`[data-bookmark-id="${escapedId}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    };
+    nextTick(scrollTarget);
+    setTimeout(scrollTarget, 100);
+    return true;
+  }
+  return false;
+}
+
+watch(bookmarks, async () => {
+  if (pendingTargetUrl) {
+    const isAlreadySelected = bookmarks.value.some(b => b.id === selectedBookmarkId.value && (normalizeBookmarkUrl(b.url) === normalizeBookmarkUrl(pendingTargetUrl) || b.url === pendingTargetUrl));
+    if (!isAlreadySelected) {
+      const matched = await focusBookmarkByUrl(pendingTargetUrl);
+      if (matched) {
+        pendingTargetUrl = '';
+      }
+    } else {
+      pendingTargetUrl = '';
+    }
+  }
+});
 
 async function persistChanges() {
   await saveStoredBookmarks(bookmarks.value);
@@ -978,33 +1143,192 @@ function handleBookmarkDragEnd() {
   dragOverFolderId.value = null;
 }
 
+function handleFolderDragStart(event, folder) {
+  draggedFolderId.value = folder.id;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/folder-id', folder.id);
+  event.dataTransfer.setData('text/plain', folder.id);
+}
+
+function handleFolderDragEnd() {
+  draggedFolderId.value = null;
+  dragOverFolderSortTarget.value = null;
+  dragOverFolderId.value = null;
+}
+
+function isFolderDescendant(childId, ancestorId) {
+  if (!childId || !ancestorId) return false;
+  const folderMap = new Map(folders.value.map(f => [f.id, f]));
+  let curr = folderMap.get(childId);
+  while (curr?.parentId) {
+    if (curr.parentId === ancestorId) return true;
+    curr = folderMap.get(curr.parentId);
+  }
+  return false;
+}
+
+function getFolderSubtree(folderId) {
+  const folderMap = new Map(folders.value.map(f => [f.id, f]));
+  const root = folderMap.get(folderId);
+  if (!root) return [];
+
+  const childIds = new Set([folderId]);
+  let added = true;
+  while (added) {
+    added = false;
+    for (const f of folders.value) {
+      if (f.parentId && childIds.has(f.parentId) && !childIds.has(f.id)) {
+        childIds.add(f.id);
+        added = true;
+      }
+    }
+  }
+
+  return folders.value.filter(f => childIds.has(f.id));
+}
+
+async function reorderFolders(srcFolder, targetFolder, position = 'before') {
+  const subtree = getFolderSubtree(srcFolder.id);
+  const subtreeIds = new Set(subtree.map(f => f.id));
+
+  if (subtreeIds.has(targetFolder.id)) {
+    showToast('无法将文件夹移动到其子文件夹内部', 'warning');
+    return;
+  }
+
+  const remaining = folders.value.filter(f => !subtreeIds.has(f.id));
+  const targetIdx = remaining.findIndex(f => f.id === targetFolder.id);
+  if (targetIdx === -1) return;
+
+  let insertIdx = targetIdx;
+  if (position === 'before') {
+    insertIdx = targetIdx;
+  } else {
+    const targetSubtree = getFolderSubtree(targetFolder.id);
+    const targetSubtreeIds = new Set(targetSubtree.map(f => f.id));
+    let lastIdx = targetIdx;
+    for (let i = targetIdx + 1; i < remaining.length; i++) {
+      if (targetSubtreeIds.has(remaining[i].id)) {
+        lastIdx = i;
+      } else {
+        break;
+      }
+    }
+    insertIdx = lastIdx + 1;
+  }
+
+  remaining.splice(insertIdx, 0, ...subtree);
+  folders.value = reconcileRecords(folders.value, remaining);
+
+  try {
+    await saveStoredFolders(folders.value);
+  } catch (e) {
+    console.warn('保存文件夹排序失败:', e);
+  }
+
+  // 若处于 Chrome 扩展中且均为原生书签，同步移动 Chrome 原生书签树中的顺序
+  if (isChromeExtension() && srcFolder.source === 'chrome' && targetFolder.source === 'chrome') {
+    try {
+      const srcNativeId = srcFolder.id.replace(/^chrome:/, '');
+      const targetNativeId = targetFolder.id.replace(/^chrome:/, '');
+      const targetNode = await new Promise(resolve => {
+        chrome.bookmarks.get(targetNativeId, res => resolve(res?.[0]));
+      });
+      if (targetNode?.parentId) {
+        const siblings = await new Promise(resolve => {
+          chrome.bookmarks.getChildren(targetNode.parentId, resolve);
+        });
+        if (siblings && siblings.length > 0) {
+          const siblingTargetIdx = siblings.findIndex(c => c.id === targetNativeId);
+          if (siblingTargetIdx !== -1) {
+            let chromeTargetIndex = position === 'before' ? siblingTargetIdx : siblingTargetIdx + 1;
+            const currentSrcIdx = siblings.findIndex(c => c.id === srcNativeId);
+            if (currentSrcIdx !== -1 && currentSrcIdx < siblingTargetIdx && position === 'before') {
+              chromeTargetIndex = Math.max(0, chromeTargetIndex - 1);
+            }
+            await new Promise(resolve => {
+              chrome.bookmarks.move(srcNativeId, {
+                parentId: targetNode.parentId,
+                index: chromeTargetIndex
+              }, resolve);
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('同步 Chrome 原生文件夹位置失败:', err);
+    }
+  }
+
+  showToast(`已调整「${srcFolder.name}」排序`);
+}
+
 function handleFolderDragOver(event, folder) {
-  event.dataTransfer.dropEffect = 'move';
-  dragOverFolderId.value = folder.id;
+  if (draggedFolderId.value) {
+    // 正在拖拽文件夹进行排序
+    if (draggedFolderId.value === folder.id || isFolderDescendant(folder.id, draggedFolderId.value)) {
+      dragOverFolderSortTarget.value = null;
+      return;
+    }
+    event.dataTransfer.dropEffect = 'move';
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relY = event.clientY - rect.top;
+    const position = relY < rect.height / 2 ? 'before' : 'after';
+    dragOverFolderSortTarget.value = { id: folder.id, position };
+    dragOverFolderId.value = null;
+  } else if (draggedBookmarkId.value) {
+    // 正在拖拽书签移入文件夹
+    event.dataTransfer.dropEffect = 'move';
+    dragOverFolderId.value = folder.id;
+    dragOverFolderSortTarget.value = null;
+  }
 }
 
 function handleFolderDragLeave(event, folder) {
+  if (dragOverFolderSortTarget.value?.id === folder.id) {
+    dragOverFolderSortTarget.value = null;
+  }
   if (dragOverFolderId.value === folder.id) {
     dragOverFolderId.value = null;
   }
 }
 
 async function handleFolderDrop(event, folder) {
-  const bmId = event.dataTransfer.getData('text/plain') || draggedBookmarkId.value;
-  dragOverFolderId.value = null;
-  draggedBookmarkId.value = null;
-  if (!bmId) return;
+  // 分流 1：如果拖入的是书签
+  if (draggedBookmarkId.value) {
+    const bmId = event.dataTransfer.getData('text/plain') || draggedBookmarkId.value;
+    dragOverFolderId.value = null;
+    draggedBookmarkId.value = null;
+    if (!bmId) return;
 
-  const bookmark = bookmarks.value.find(b => b.id === bmId);
-  if (!bookmark) return;
+    const bookmark = bookmarks.value.find(b => b.id === bmId);
+    if (!bookmark) return;
 
-  // 如果已经在该文件夹中，无需重复移动
-  if (isInFolder(bookmark, folder)) {
-    showToast(`书签已在「${folder.name}」中`, 'info');
+    // 如果已经在该文件夹中，无需重复移动
+    if (isInFolder(bookmark, folder)) {
+      showToast(`书签已在「${folder.name}」中`, 'info');
+      return;
+    }
+
+    await moveBookmarkToFolder(bookmark, folder);
     return;
   }
 
-  await moveBookmarkToFolder(bookmark, folder);
+  // 分流 2：如果拖入的是文件夹进行排序
+  const srcId = draggedFolderId.value || event.dataTransfer.getData('text/folder-id');
+  const sortTarget = dragOverFolderSortTarget.value;
+  draggedFolderId.value = null;
+  dragOverFolderSortTarget.value = null;
+  dragOverFolderId.value = null;
+
+  if (!srcId || !sortTarget || sortTarget.id !== folder.id || srcId === folder.id) {
+    return;
+  }
+
+  const srcFolder = folders.value.find(f => f.id === srcId);
+  if (!srcFolder) return;
+
+  await reorderFolders(srcFolder, folder, sortTarget.position);
 }
 
 function recordVisit(id) {
@@ -1627,12 +1951,30 @@ async function reloadConfig(force = false) {
   if (!disposed && force) await refreshRemote();
 }
 
-async function handleRuntimeMessage(message) {
+function handleRuntimeMessage(message, sender, sendResponse) {
   if (message?.type === 'BOOKMARK_UPDATED') {
-    const storedList = await getStoredBookmarks();
-    if (storedList && storedList.length > 0) {
-      bookmarks.value = reconcileRecords(bookmarks.value, aggregateBookmarksByUrl(storedList));
-    }
+    (async () => {
+      const storedList = await getStoredBookmarks();
+      if (storedList && storedList.length > 0) {
+        bookmarks.value = reconcileRecords(bookmarks.value, aggregateBookmarksByUrl(storedList));
+        if (pendingTargetUrl) {
+          const matched = await focusBookmarkByUrl(pendingTargetUrl);
+          if (matched) pendingTargetUrl = '';
+        }
+      }
+    })();
+  } else if (message?.type === 'FOCUS_BOOKMARK' && message?.url) {
+    pendingTargetUrl = message.url;
+    (async () => {
+      const ok = await focusBookmarkByUrl(message.url);
+      if (ok) pendingTargetUrl = '';
+      try {
+        const newQuery = `?url=${encodeURIComponent(message.url)}`;
+        window.history.replaceState(null, '', newQuery);
+      } catch {}
+      sendResponse?.({ received: true, focused: ok });
+    })();
+    return true;
   }
 }
 
@@ -1647,13 +1989,29 @@ function onStorageChanged(changes, area) {
 }
 
 onMounted(async () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialUrl = urlParams.get('url') || urlParams.get('targetUrl');
+  if (initialUrl) {
+    pendingTargetUrl = initialUrl;
+  }
+
   const storedList = await getStoredBookmarks();
   bookmarks.value = aggregateBookmarksByUrl(storedList);
   folders.value = await getStoredFolders();
   serverConfig.value = await getServerConfig();
-  if (bookmarks.value.length > 0) {
+
+  let targetMatched = false;
+  if (pendingTargetUrl) {
+    targetMatched = await focusBookmarkByUrl(pendingTargetUrl);
+    if (targetMatched) {
+      pendingTargetUrl = '';
+    }
+  }
+
+  if (!targetMatched && bookmarks.value.length > 0 && !selectedBookmarkId.value) {
     selectedBookmarkId.value = bookmarks.value[0].id;
   }
+
   if (disposed) return;
   if (isChromeExtension()) {
     for (const event of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered', 'onImportEnded']) {
@@ -1667,6 +2025,10 @@ onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeyDown);
   // 初次加载对齐一次（非交互触发）
   await Promise.all([refreshChrome(false), refreshRemote()]);
+  if (pendingTargetUrl) {
+    const matched = await focusBookmarkByUrl(pendingTargetUrl);
+    if (matched) pendingTargetUrl = '';
+  }
 });
 
 onUnmounted(() => {

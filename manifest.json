@@ -13,8 +13,8 @@
     "default_popup": "popup.html",
     "default_title": "截屏书签",
     "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png"
+      "16": "icons/action-default-16.png",
+      "32": "icons/action-default-32.png"
     }
   },
   "options_page": "options.html",

@@ -1,4 +1,4 @@
-import { checkUrlInShioriFolder, setExtensionBookmarkIcon, saveToShioriFolder, removeFromShioriFolder } from './services/nativeBookmarkSync.js';
+import { checkUrlBookmarked, setExtensionBookmarkIcon, refreshActiveTabIcon, saveToShioriFolder, removeFromShioriFolder } from './services/nativeBookmarkSync.js';
 import { remoteAddBookmark, remoteDeleteBookmark, openRemoteLibraries } from './services/shioriApi.js';
 
 console.log('CutBookmark 2.0 Background Service Worker 初始化');
@@ -7,11 +7,11 @@ console.log('CutBookmark 2.0 Background Service Worker 初始化');
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    if (tab && tab.url && !tab.url.startsWith('chrome://')) {
-      const isBookmarked = await checkUrlInShioriFolder(tab.url);
-      setExtensionBookmarkIcon(isBookmarked);
+    if (tab && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
+      const isBookmarked = await checkUrlBookmarked(tab.url);
+      setExtensionBookmarkIcon(isBookmarked, activeInfo.tabId);
     } else {
-      setExtensionBookmarkIcon(false);
+      setExtensionBookmarkIcon(false, activeInfo.tabId);
     }
   } catch (err) {
     // 忽略异常
@@ -20,15 +20,27 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 
 // 标签页完成加载/URL 改变时检测
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab && tab.url && !tab.url.startsWith('chrome://')) {
-    const isBookmarked = await checkUrlInShioriFolder(tab.url);
-    setExtensionBookmarkIcon(isBookmarked);
+  if (changeInfo.status === 'complete' && tab && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
+    const isBookmarked = await checkUrlBookmarked(tab.url);
+    setExtensionBookmarkIcon(isBookmarked, tabId);
   }
 });
+
+// 监听书签变动，实时同步当前激活标签页的图标状态
+if (typeof chrome !== 'undefined' && chrome.bookmarks) {
+  const onBookmarkChange = () => {
+    refreshActiveTabIcon();
+  };
+  chrome.bookmarks.onCreated?.addListener(onBookmarkChange);
+  chrome.bookmarks.onRemoved?.addListener(onBookmarkChange);
+  chrome.bookmarks.onChanged?.addListener(onBookmarkChange);
+  chrome.bookmarks.onMoved?.addListener(onBookmarkChange);
+}
 
 // 扩展安装事件
 chrome.runtime.onInstalled.addListener(() => {
   console.log('CutBookmark 2.0 扩展安装成功');
+  refreshActiveTabIcon();
 });
 
 // 扩展间消息通信监听
@@ -38,6 +50,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (type) {
     case 'ping':
       sendResponse({ status: 'pong' });
+      break;
+
+    case 'BOOKMARK_UPDATED':
+      refreshActiveTabIcon();
+      sendResponse({ status: 'success' });
       break;
 
     case 'open-libraries':
@@ -112,13 +129,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'openDashboard':
     case 'openOptions': {
-      const url = chrome.runtime.getURL('options.html');
-      chrome.tabs.query({ url }, (tabs) => {
+      const targetUrl = request.targetUrl || request.url || '';
+      const targetQuery = targetUrl ? `?url=${encodeURIComponent(targetUrl)}` : '';
+      const baseOptionsUrl = chrome.runtime.getURL('options.html');
+      const fullOptionsUrl = `${baseOptionsUrl}${targetQuery}`;
+
+      chrome.tabs.query({ url: `${baseOptionsUrl}*` }, (tabs) => {
         if (tabs && tabs.length > 0) {
-          chrome.tabs.update(tabs[0].id, { active: true });
-          chrome.windows.update(tabs[0].windowId, { focused: true });
+          const tab = tabs[0];
+          chrome.tabs.update(tab.id, { active: true });
+          if (tab.windowId) {
+            chrome.windows.update(tab.windowId, { focused: true });
+          }
+          if (targetUrl) {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'FOCUS_BOOKMARK',
+              url: targetUrl
+            }, (res) => {
+              if (chrome.runtime?.lastError || !res?.received) {
+                chrome.tabs.update(tab.id, { url: fullOptionsUrl });
+              }
+            });
+          }
         } else {
-          chrome.tabs.create({ url });
+          chrome.tabs.create({ url: fullOptionsUrl });
         }
       });
       sendResponse({ success: true });

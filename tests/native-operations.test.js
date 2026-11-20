@@ -53,3 +53,50 @@ test('read-only bookmark checks never create a missing Shiori folder', async () 
   assert.equal(await sync.checkUrlInShioriFolder('https://page.test'), false);
   assert.equal(creates, 0);
 });
+
+test('checkUrlBookmarked detects URL anywhere in Chrome tree or IndexedDB', async () => {
+  globalThis.chrome = {
+    tabs: {},
+    runtime: {},
+    bookmarks: {
+      search: (query, callback) => {
+        if (query.url === 'https://bookmarked.com') {
+          callback([{ id: '99', url: 'https://bookmarked.com', parentId: 'any-folder' }]);
+        } else {
+          callback([]);
+        }
+      }
+    }
+  };
+
+  assert.equal(await sync.checkUrlBookmarked('https://bookmarked.com'), true);
+  assert.equal(await sync.checkUrlBookmarked('https://not-bookmarked.com'), false);
+});
+
+test('setExtensionBookmarkIcon switches icon path, badge and title between bookmarked and default', () => {
+  let iconDetails = null;
+  let badgeDetails = null;
+  let titleDetails = null;
+
+  globalThis.chrome = {
+    tabs: {},
+    bookmarks: {},
+    action: {
+      setIcon: (details, cb) => { iconDetails = details; cb?.(); },
+      setBadgeText: (details, cb) => { badgeDetails = details; cb?.(); },
+      setBadgeBackgroundColor: (details, cb) => { cb?.(); },
+      setTitle: (details, cb) => { titleDetails = details; cb?.(); }
+    }
+  };
+
+  // 1. 已收藏：设置为紫罗兰靶心勾选图标 + 已收藏提示
+  sync.setExtensionBookmarkIcon(true, 123);
+  assert.equal(iconDetails.tabId, 123);
+  assert.equal(iconDetails.path[16], 'icons/action-bookmarked-16.png');
+  assert.equal(titleDetails.title.includes('已收藏'), true);
+
+  // 2. 未收藏：设置为默认图标
+  sync.setExtensionBookmarkIcon(false, 123);
+  assert.equal(iconDetails.path[16], 'icons/action-default-16.png');
+  assert.equal(titleDetails.title.includes('添加'), true);
+});

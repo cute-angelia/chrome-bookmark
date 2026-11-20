@@ -465,10 +465,20 @@ function openRemoteLibrary() {
 }
 
 function openDashboard() {
-  if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-    chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+  const targetUrl = pageUrl.value;
+  if (isChromeExtension()) {
+    chrome.runtime.sendMessage({
+      action: 'openDashboard',
+      targetUrl
+    }, () => {
+      window.close();
+    });
+    setTimeout(() => {
+      window.close();
+    }, 150);
   } else {
-    window.open('/options.html', '_blank');
+    const query = targetUrl ? `?url=${encodeURIComponent(targetUrl)}` : '';
+    window.open(`/options.html${query}`, '_blank');
   }
 }
 
