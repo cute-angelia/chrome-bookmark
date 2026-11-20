@@ -170,7 +170,7 @@ import {
   ExternalLink, CheckCircle2
 } from 'lucide-vue-next';
 import { getCurrentPageInfo, captureCurrentTab } from '../services/bookmarkService.js';
-import { isChromeExtension, getStoredBookmarks, saveStoredBookmarks, getStoredFolders, showToast } from '../services/bookmarkStorage.js';
+import { isChromeExtension, getStoredBookmarks, saveStoredBookmarks, getStoredFolders, showToast, moveToTrashStorage } from '../services/bookmarkStorage.js';
 import { getServerConfig, remoteAddBookmark, remoteDeleteBookmark, openRemoteLibraries } from '../services/shioriApi.js';
 import {
   saveToShioriFolder, removeFromShioriFolder, checkUrlInShioriFolder,
@@ -434,21 +434,30 @@ async function handleRemoveBookmark() {
     // 1. 本地原生书签文件夹移除
     await removeFromShioriFolder(pageUrl.value);
 
-    // 2. 工作台存储移除所有该 URL 的记录（包括存量历史孤立记录）
+    // 2. 工作台存储移除所有该 URL 的记录，并移入回收站
     const normUrl = normalizeBookmarkUrl(pageUrl.value);
     const list = await getStoredBookmarks();
+    const removedItems = list.filter(b => normalizeBookmarkUrl(b.url) === normUrl);
     const updated = list.filter(b => normalizeBookmarkUrl(b.url) !== normUrl);
     await saveStoredBookmarks(updated);
 
-    // 3. 远程服务器删除
-    if (isServerConnected.value) {
-      await remoteDeleteBookmark(pageUrl.value);
+    if (removedItems.length > 0) {
+      await moveToTrashStorage(removedItems);
+    } else {
+      await moveToTrashStorage({
+        id: `local:${Date.now()}`,
+        title: pageTitle.value || pageUrl.value,
+        url: pageUrl.value,
+        screenshot: screenshotUrl.value || '',
+        tags: [...selectedTags.value],
+        dateAdded: Date.now()
+      });
     }
 
-    // 4. 重置图标与状态
+    // 3. 重置图标与状态
     setExtensionBookmarkIcon(false);
     isCurrentBookmarked.value = false;
-    showToast('书签已从本地与远程移除');
+    showToast('书签已移入回收站');
 
     setTimeout(() => {
       if (typeof window !== 'undefined' && window.close) {

@@ -40,6 +40,26 @@
               </span>
             </button>
           </nav>
+
+          <!-- 回收站专属入口 -->
+          <div class="pt-2 mt-2 border-t border-slate-200/70">
+            <button
+              @click="selectTrashView"
+              class="w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer"
+              :class="activeView === 'trash' && !selectedFolderFilter && !selectedTagFilter ? 'bg-rose-50 text-rose-700 shadow-xs' : 'text-slate-600 hover:text-rose-700 hover:bg-rose-50/50'"
+            >
+              <div class="flex items-center space-x-2 truncate">
+                <Trash2 class="w-3.5 h-3.5 shrink-0" :class="activeView === 'trash' ? 'text-rose-600' : 'text-slate-400'" />
+                <span class="truncate">回收站</span>
+              </div>
+              <span
+                class="text-[10px] px-1.5 py-0.2 rounded-full font-mono"
+                :class="activeView === 'trash' ? 'bg-white text-rose-700' : 'bg-slate-100 text-slate-500'"
+              >
+                {{ trashBookmarks.length }}
+              </span>
+            </button>
+          </div>
         </div>
 
         <!-- 标签云 (放于分类文件夹上方) -->
@@ -220,6 +240,21 @@
           />
         </div>
 
+        <!-- 回收站状态横幅 -->
+        <div v-if="activeView === 'trash'" class="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800">
+          <div class="flex items-center space-x-1.5">
+            <Trash2 class="w-3.5 h-3.5 text-rose-600 shrink-0" />
+            <span class="font-medium text-[11px]">回收站（系统自动清理 7 天前书签）</span>
+          </div>
+          <button
+            v-if="trashBookmarks.length > 0"
+            @click="clearAllTrash"
+            class="text-[10px] font-semibold text-rose-600 hover:text-rose-800 underline cursor-pointer"
+          >
+            清空回收站
+          </button>
+        </div>
+
         <!-- 当前过滤状态胶囊 (文件夹或标签筛选激活时显示) -->
         <div v-if="selectedFolderFilter || selectedTagFilter" class="flex items-center gap-1.5 flex-wrap pt-0.5">
           <span class="text-[11px] text-slate-400">当前筛选:</span>
@@ -360,11 +395,31 @@
               <h3 class="text-xs font-semibold text-slate-900 group-hover:text-indigo-600 truncate transition">
                 {{ bm.title }}
               </h3>
+              <!-- 回收站专属快捷恢复/永久删除按钮 -->
+              <div v-if="bm.deletedAt" class="flex items-center gap-1 shrink-0 ml-1.5" @click.stop>
+                <button
+                  @click="restoreSingle(bm.id)"
+                  class="p-1 rounded-md text-indigo-600 hover:bg-indigo-50 border border-indigo-200 transition cursor-pointer"
+                  title="恢复此书签"
+                >
+                  <RotateCcw class="w-3 h-3" />
+                </button>
+                <button
+                  @click="permanentDeleteSingle(bm.id)"
+                  class="p-1 rounded-md text-rose-500 hover:bg-rose-50 border border-rose-200 transition cursor-pointer"
+                  title="彻底删除"
+                >
+                  <Trash2 class="w-3 h-3" />
+                </button>
+              </div>
             </div>
             <p class="text-[11px] text-slate-400 font-mono truncate mt-0.5">{{ bm.domain }}</p>
 
             <div class="flex items-center justify-between mt-1.5">
-              <div class="flex items-center gap-1 flex-wrap">
+              <div v-if="bm.deletedAt" class="text-[10px] text-amber-600 font-medium">
+                {{ formatTrashTime(bm.deletedAt) }}
+              </div>
+              <div v-else class="flex items-center gap-1 flex-wrap">
                 <span v-if="bm.isNative || bm.source === 'chrome'" class="text-[9px] px-1.5 py-0.2 rounded-md bg-sky-50 text-sky-700 border border-sky-200 font-medium">本机</span>
                 <span v-if="bm.isRemote || bm.source === 'remote'" class="text-[9px] px-1.5 py-0.2 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">远程</span>
                 <span v-if="!bm.isNative && !bm.isRemote && bm.source !== 'chrome' && bm.source !== 'remote'" class="text-[9px] px-1.5 py-0.2 rounded-md bg-slate-100 text-slate-600 border border-slate-200 font-medium">本地</span>
@@ -415,7 +470,25 @@
                 {{ new Date(activeBookmark.dateAdded).toLocaleDateString() }} 录入 · 累计 <strong class="text-indigo-600">{{ activeBookmark.visits || 1 }}</strong> 次访问
               </span>
             </div>
-            <div class="flex items-center gap-1.5 shrink-0">
+            <div v-if="isCurrentInTrash" class="flex items-center gap-1.5 shrink-0">
+              <button
+                @click="restoreSingle(activeBookmark.id)"
+                class="px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition cursor-pointer flex items-center gap-1.5 text-xs font-semibold shadow-2xs"
+                title="恢复此书签"
+              >
+                <RotateCcw class="w-3.5 h-3.5" />
+                <span>恢复书签</span>
+              </button>
+              <button
+                @click="permanentDeleteSingle(activeBookmark.id)"
+                class="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-600 transition cursor-pointer flex items-center gap-1 text-xs font-medium shadow-2xs"
+                title="彻底永久删除"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+                <span>彻底删除</span>
+              </button>
+            </div>
+            <div v-else class="flex items-center gap-1.5 shrink-0">
               <button
                 @click="syncSingleToRemote(activeBookmark)"
                 :disabled="isSingleSyncing"
@@ -439,11 +512,25 @@
               <button
                 @click="deleteSingle(activeBookmark.id)"
                 class="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                title="删除此书签"
+                title="移入回收站"
               >
                 <Trash2 class="w-4 h-4" />
               </button>
             </div>
+          </div>
+
+          <!-- 回收站提示胶囊 -->
+          <div
+            v-if="isCurrentInTrash"
+            class="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center justify-between"
+          >
+            <span>此书签已在回收站中（{{ formatTrashTime(activeBookmark.deletedAt) }}）</span>
+            <button
+              @click="restoreSingle(activeBookmark.id)"
+              class="font-semibold text-indigo-600 hover:underline cursor-pointer"
+            >
+              点击恢复
+            </button>
           </div>
 
           <!-- 可直接点击跳转的标题（链接图标紧跟标题文字） -->
@@ -636,7 +723,7 @@ import Swal from 'sweetalert2';
 import {
   Camera, Plus, Folder, Search, List, Pin, ExternalLink, Trash2,
   FolderPlus, Pencil,
-  RotateCw, Download, Upload, FolderArchive,
+  RotateCw, RotateCcw, Download, Upload, FolderArchive,
   Star, Image, Clock, Flame, CloudUpload,
   ChevronDown, ChevronRight
 } from 'lucide-vue-next';
@@ -649,6 +736,8 @@ import {
   getLastBookmarkSyncTime, setLastBookmarkSyncTime,
   isBookmarkSyncNeeded,
   exportDataAsJson, importDataFromJson,
+  getTrashBookmarks, saveTrashBookmarks, moveToTrashStorage,
+  restoreFromTrashStorage, deleteFromTrashPermanently, clearTrashStorage,
   showToast, confirmDialog, isChromeExtension
 } from '../services/bookmarkStorage.js';
 import { getServerConfig, fetchRemoteBookmarkUpdates, fetchRemoteBookmarkByUrl, remoteAddBookmark, remoteDeleteBookmark } from '../services/shioriApi.js';
@@ -698,6 +787,11 @@ const dragOverFolderSortTarget = ref(null);
 
 const selectedBookmarkId = ref(null);
 const newTagInput = ref('');
+const trashBookmarks = ref([]);
+const isTrashView = computed(() => activeView.value === 'trash');
+const isCurrentInTrash = computed(() => {
+  return isTrashView.value || trashBookmarks.value.some(b => b.id === selectedBookmarkId.value);
+});
 
 // Modals
 const showCreateModal = ref(false);
@@ -787,8 +881,22 @@ const allUniqueTags = computed(() => {
 });
 
 const activeBookmark = computed(() => {
+  if (isCurrentInTrash.value) {
+    return trashBookmarks.value.find(b => b.id === selectedBookmarkId.value) || trashBookmarks.value[0];
+  }
   return bookmarks.value.find(b => b.id === selectedBookmarkId.value) || bookmarks.value[0];
 });
+
+function formatTrashTime(deletedAt) {
+  if (!deletedAt) return '';
+  const diff = Math.max(0, Date.now() - deletedAt);
+  const daysAgo = Math.floor(diff / 86400000);
+  const remainDays = Math.max(1, 7 - daysAgo);
+  if (daysAgo === 0) {
+    return `今天删除 · 约 ${remainDays} 天后清理`;
+  }
+  return `${daysAgo} 天前删除 · 约 ${remainDays} 天后清理`;
+}
 
 function isInFolder(bookmark, folder) {
   if (folder.source === 'remote') {
@@ -823,6 +931,17 @@ function selectSmartView(viewId) {
   activeView.value = viewId;
   selectedFolderFilter.value = '';
   selectedTagFilter.value = '';
+  if (viewId === 'trash') {
+    selectedBookmarkId.value = trashBookmarks.value[0]?.id || null;
+  } else {
+    if (bookmarks.value.length > 0 && (!selectedBookmarkId.value || isCurrentInTrash.value)) {
+      selectedBookmarkId.value = bookmarks.value[0]?.id || null;
+    }
+  }
+}
+
+function selectTrashView() {
+  selectSmartView('trash');
 }
 
 function selectFolder(folderId) {
@@ -861,6 +980,22 @@ function clearAllFilters() {
 }
 
 const filteredList = computed(() => {
+  if (activeView.value === 'trash') {
+    let list = [...trashBookmarks.value];
+    if (searchQuery.value.trim()) {
+      const q = searchQuery.value.toLowerCase();
+      list = list.filter(b =>
+        b.title?.toLowerCase().includes(q) ||
+        b.url?.toLowerCase().includes(q) ||
+        b.domain?.toLowerCase().includes(q) ||
+        (b.notes && b.notes.toLowerCase().includes(q)) ||
+        (b.tags && b.tags.some(t => t.toLowerCase().includes(q)))
+      );
+    }
+    list.sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+    return list;
+  }
+
   let list = [...bookmarks.value];
 
   // 1. 智能视图
@@ -1010,36 +1145,101 @@ function togglePin(id) {
 }
 
 async function deleteSingle(id) {
-  const ok = await confirmDialog('确定要删除此书签吗？', '对应的 Chrome 本机书签与远程书签也会同步删除，此操作无法撤销');
-  if (ok) {
-    const target = bookmarks.value.find(b => b.id === id);
-    try {
-      await deleteAtSource(target);
-    } catch (error) {
-      showToast(error.message || '删除失败', 'error');
-      return;
+  const target = bookmarks.value.find(b => b.id === id);
+  if (!target) return;
+
+  // 1. 点 删除 不要确认了：静默尝试从 Chrome 原生书签树移除，避免书签栏继续堆积
+  try {
+    const native = await selectNativeMatch(target);
+    if (native?.id && typeof chrome !== 'undefined' && chrome.bookmarks?.remove) {
+      try { await chrome.bookmarks.remove(native.id); } catch {}
     }
-    const normUrl = target ? normalizeBookmarkUrl(target.url) : '';
-    bookmarks.value = bookmarks.value.filter(b => b.id !== id && (!normUrl || normalizeBookmarkUrl(b.url) !== normUrl));
-    try {
-      await deleteStoredBookmark(id);
-      if (normUrl) {
-        const stored = await getStoredBookmarks();
-        for (const item of stored) {
-          if (normalizeBookmarkUrl(item.url) === normUrl) {
-            await deleteStoredBookmark(item.id);
-          }
+  } catch {}
+
+  // 2. 从活动书签列表及持久化存储中移除
+  const normUrl = target ? normalizeBookmarkUrl(target.url) : '';
+  bookmarks.value = bookmarks.value.filter(b => b.id !== id && (!normUrl || normalizeBookmarkUrl(b.url) !== normUrl));
+  try {
+    await deleteStoredBookmark(id);
+    if (normUrl) {
+      const stored = await getStoredBookmarks();
+      for (const item of stored) {
+        if (normalizeBookmarkUrl(item.url) === normUrl) {
+          await deleteStoredBookmark(item.id);
         }
       }
-    } catch {
-      try { await persistChanges(); }
-      catch (error) { showToast(`来源已删除，但本地缓存保存失败：${error.message}`, 'error'); return; }
     }
-    if (selectedBookmarkId.value === id) {
-      selectedBookmarkId.value = bookmarks.value[0]?.id || null;
-    }
+  } catch {
+    try { await persistChanges(); } catch {}
+  }
 
-    showToast('书签已从本机与远程删除');
+  // 3. 移入回收站存储
+  trashBookmarks.value = await moveToTrashStorage(target);
+
+  // 4. 重置选中项并提示
+  if (selectedBookmarkId.value === id) {
+    selectedBookmarkId.value = bookmarks.value[0]?.id || null;
+  }
+  showToast('已移入回收站（可保留 7 天）', 'info');
+}
+
+async function restoreSingle(id) {
+  const restored = await restoreFromTrashStorage(id);
+  if (!restored) return;
+
+  delete restored.deletedAt;
+
+  // 若在扩展环境中，在对应原生文件夹恢复创建 Chrome 原生书签
+  if (isChromeExtension()) {
+    try {
+      let targetParentId = restored.folderId;
+      if (targetParentId && typeof targetParentId === 'string' && targetParentId.startsWith('chrome:')) {
+        targetParentId = targetParentId.slice('chrome:'.length);
+      }
+      await saveToShioriFolder(restored.url, restored.title, targetParentId);
+    } catch (e) {
+      console.warn('原生书签恢复创建失败:', e);
+    }
+  }
+
+  // 存回本地活动书签库
+  bookmarks.value = aggregateBookmarksByUrl([restored, ...bookmarks.value]);
+  await updateStoredBookmark(restored);
+  await persistChanges();
+
+  trashBookmarks.value = trashBookmarks.value.filter(b => b.id !== id);
+  selectedBookmarkId.value = restored.id;
+  showToast('书签已从回收站恢复', 'success');
+}
+
+async function permanentDeleteSingle(id) {
+  const target = trashBookmarks.value.find(b => b.id === id);
+  trashBookmarks.value = await deleteFromTrashPermanently(id);
+
+  // 若有关联远程，静默尝试向远程删除
+  if (target && (target.isRemote || target.remoteId || target.source === 'remote')) {
+    try {
+      await remoteDeleteBookmark(target.url);
+    } catch (e) {
+      console.warn('远程永久删除失败:', e);
+    }
+  }
+
+  if (selectedBookmarkId.value === id) {
+    selectedBookmarkId.value = trashBookmarks.value[0]?.id || null;
+  }
+  showToast('已彻底删除');
+}
+
+async function clearAllTrash() {
+  if (trashBookmarks.value.length === 0) return;
+  const ok = await confirmDialog('确定要清空回收站吗？', '回收站中的所有书签将被永久删除，此操作无法撤销');
+  if (ok) {
+    trashBookmarks.value = await clearTrashStorage();
+    if (activeView.value === 'trash') {
+      selectedBookmarkId.value = null;
+    }
+    showToast('回收站已清空');
   }
 }
 
@@ -1510,26 +1710,30 @@ async function batchSyncToRemote() {
 }
 
 async function batchDelete() {
-  const ok = await confirmDialog(`确定删除选中的 ${selectedBatchIds.value.length} 个书签吗？`, '对应的 Chrome 本机书签也会删除，此操作无法撤销');
-  if (ok) {
-    const targets = bookmarks.value.filter(b => selectedBatchIds.value.includes(b.id));
-    const deleted = [];
-    for (const target of targets) {
-      try {
-        await deleteAtSource(target);
-        deleted.push(target.id);
-      } catch (error) {
-        showToast(error.message || '部分书签删除失败', 'error');
-        break;
-      }
-    }
-    bookmarks.value = bookmarks.value.filter(b => !deleted.includes(b.id));
-    await persistChanges();
+  if (selectedBatchIds.value.length === 0) return;
+  // 点 删除 不要确认了：直接移入回收站
+  const targets = bookmarks.value.filter(b => selectedBatchIds.value.includes(b.id));
+  if (targets.length === 0) return;
 
-    selectedBatchIds.value = [];
-    isBatchMode.value = false;
-    if (deleted.length === targets.length) showToast('批量删除成功');
+  for (const target of targets) {
+    try {
+      const native = await selectNativeMatch(target);
+      if (native?.id && typeof chrome !== 'undefined' && chrome.bookmarks?.remove) {
+        try { await chrome.bookmarks.remove(native.id); } catch {}
+      }
+      await deleteStoredBookmark(target.id);
+    } catch {}
   }
+
+  const deletedIds = new Set(targets.map(t => t.id));
+  bookmarks.value = bookmarks.value.filter(b => !deletedIds.has(b.id));
+  await persistChanges();
+
+  trashBookmarks.value = await moveToTrashStorage(targets);
+
+  selectedBatchIds.value = [];
+  isBatchMode.value = false;
+  showToast(`已将 ${targets.length} 个书签移入回收站（可保留 7 天）`, 'info');
 }
 
 // 增删与管理文件夹
@@ -1999,6 +2203,7 @@ onMounted(async () => {
   bookmarks.value = aggregateBookmarksByUrl(storedList);
   folders.value = await getStoredFolders();
   serverConfig.value = await getServerConfig();
+  trashBookmarks.value = await getTrashBookmarks();
 
   let targetMatched = false;
   if (pendingTargetUrl) {

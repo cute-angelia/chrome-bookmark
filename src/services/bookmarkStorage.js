@@ -204,3 +204,98 @@ export async function confirmDialog(title, text = '此操作无法撤销') {
   });
   return result.isConfirmed;
 }
+
+const TRASH_STORAGE_KEY = 'cutbookmark_trash_records_v1';
+export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 获取回收站中的全部书签（自动清理超过 7 天前的书签）
+ */
+export async function getTrashBookmarks() {
+  try {
+    const settings = await readIndexedRecords('settings');
+    const record = settings.find(r => r.id === TRASH_STORAGE_KEY);
+    const trash = Array.isArray(record?.value) ? record.value : [];
+    const now = Date.now();
+    // 自动清理 7 天前（即超过 7 天）的书签
+    const valid = trash.filter(b => b && b.deletedAt && (now - b.deletedAt < SEVEN_DAYS_MS));
+    if (valid.length !== trash.length) {
+      const filtered = settings.filter(r => r.id !== TRASH_STORAGE_KEY);
+      await writeIndexedRecords('settings', [...filtered, { id: TRASH_STORAGE_KEY, value: valid }]);
+    }
+    return valid;
+  } catch (e) {
+    console.warn('读取回收站失败:', e);
+    return [];
+  }
+}
+
+/**
+ * 保存回收站列表
+ */
+export async function saveTrashBookmarks(trashList) {
+  try {
+    const now = Date.now();
+    const valid = (trashList || []).filter(b => b && b.deletedAt && (now - b.deletedAt < SEVEN_DAYS_MS));
+    const settings = await readIndexedRecords('settings');
+    const filtered = settings.filter(r => r.id !== TRASH_STORAGE_KEY);
+    await writeIndexedRecords('settings', [...filtered, { id: TRASH_STORAGE_KEY, value: valid }]);
+    return valid;
+  } catch (e) {
+    console.warn('保存回收站失败:', e);
+    return trashList || [];
+  }
+}
+
+/**
+ * 将单个或多个书签移入回收站
+ */
+export async function moveToTrashStorage(bookmarksToTrash) {
+  const current = await getTrashBookmarks();
+  const list = Array.isArray(bookmarksToTrash) ? bookmarksToTrash : [bookmarksToTrash];
+  const now = Date.now();
+  const additions = list.map(b => ({
+    ...b,
+    deletedAt: b.deletedAt || now
+  }));
+  const idSet = new Set(additions.map(item => item.id));
+  const merged = [
+    ...additions,
+    ...current.filter(item => !idSet.has(item.id))
+  ];
+  return saveTrashBookmarks(merged);
+}
+
+/**
+ * 从回收站恢复书签
+ */
+export async function restoreFromTrashStorage(id) {
+  const current = await getTrashBookmarks();
+  const target = current.find(b => b.id === id);
+  if (target) {
+    const remaining = current.filter(b => b.id !== id);
+    await saveTrashBookmarks(remaining);
+  }
+  return target;
+}
+
+/**
+ * 从回收站永久删除
+ */
+export async function deleteFromTrashPermanently(id) {
+  const current = await getTrashBookmarks();
+  const remaining = current.filter(b => b.id !== id);
+  await saveTrashBookmarks(remaining);
+  return remaining;
+}
+
+/**
+ * 清空回收站
+ */
+export async function clearTrashStorage() {
+  const settings = await readIndexedRecords('settings');
+  const filtered = settings.filter(r => r.id !== TRASH_STORAGE_KEY);
+  await writeIndexedRecords('settings', [...filtered, { id: TRASH_STORAGE_KEY, value: [] }]);
+  return [];
+}
+
