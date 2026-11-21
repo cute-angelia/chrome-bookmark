@@ -180,6 +180,7 @@ import { readChromeLibrary, normalizeBookmarkUrl, aggregateBookmarksByUrl } from
 
 const pageTitle = ref('');
 const pageUrl = ref('');
+const pageTabId = ref(null);
 const screenshotUrl = ref('');
 const screenshotError = ref('');
 const folderOptions = ref([]);
@@ -203,6 +204,7 @@ async function initPage() {
   const info = await getCurrentPageInfo();
   pageTitle.value = info.title;
   pageUrl.value = info.url;
+  pageTabId.value = info.tabId;
 
   // 1. 动态加载真实 Chrome 书签目录树
   if (isChromeExtension()) {
@@ -275,7 +277,7 @@ async function initPage() {
     }
   }
 
-  setExtensionBookmarkIcon(isCurrentBookmarked.value);
+  setExtensionBookmarkIcon(isCurrentBookmarked.value, pageTabId.value);
 
   if (!screenshotUrl.value) {
     await takeScreenshot();
@@ -351,7 +353,7 @@ async function saveBookmark() {
     }
     if (isChromeExtension()) {
       nativeNode = await saveToShioriFolder(pageUrl.value, pageTitle.value, targetParentId);
-      setExtensionBookmarkIcon(true);
+      setExtensionBookmarkIcon(true, pageTabId.value);
       isCurrentBookmarked.value = true;
     }
 
@@ -455,7 +457,7 @@ async function handleRemoveBookmark() {
     }
 
     // 3. 重置图标与状态
-    setExtensionBookmarkIcon(false);
+    setExtensionBookmarkIcon(false, pageTabId.value);
     isCurrentBookmarked.value = false;
     showToast('书签已移入回收站');
 

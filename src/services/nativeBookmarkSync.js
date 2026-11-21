@@ -181,10 +181,33 @@ export async function checkUrlBookmarked(url) {
 export const checkUrlInShioriFolder = checkUrlBookmarked;
 
 /**
- * 根据是否已收藏动态设置扩展图标及 Badge / Title 视觉反馈
+ * 确保全局默认徽章永远清空，防止新标签页无意继承五角星
+ */
+export function clearGlobalBadge() {
+  if (!isChromeExtension() || !chrome.action?.setBadgeText) return;
+  chrome.action.setBadgeText({ text: '' }, () => {
+    if (chrome.runtime?.lastError) { /* ignore */ }
+  });
+}
+
+/**
+ * 根据是否已收藏动态设置指定 Tab 的扩展图标及 Badge / Title 视觉反馈
+ * 严格针对具体 tabId 设置，杜绝全局 Badge 污染
  */
 export function setExtensionBookmarkIcon(isBookmarked, tabId = null) {
   if (!isChromeExtension() || !chrome.action) return;
+
+  // 严禁不带 tabId 直接设置，防止 Chrome 将其设为全局默认徽章污染新页面
+  if (typeof tabId !== 'number') {
+    if (chrome.tabs?.query) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs[0]?.id) {
+          setExtensionBookmarkIcon(isBookmarked, tabs[0].id);
+        }
+      });
+    }
+    return;
+  }
 
   const iconPath = isBookmarked
     ? {
@@ -198,17 +221,10 @@ export function setExtensionBookmarkIcon(isBookmarked, tabId = null) {
         64: 'icons/action-default-64.png'
       };
 
-  const iconDetails = { path: iconPath };
-  const badgeDetails = { text: isBookmarked ? '★' : '' };
-  const badgeColorDetails = { color: '#4f46e5' };
-  const titleDetails = { title: isBookmarked ? '已收藏至书签 (截屏书签)' : '添加截屏书签' };
-
-  if (typeof tabId === 'number') {
-    iconDetails.tabId = tabId;
-    badgeDetails.tabId = tabId;
-    badgeColorDetails.tabId = tabId;
-    titleDetails.tabId = tabId;
-  }
+  const iconDetails = { path: iconPath, tabId };
+  const badgeDetails = { text: isBookmarked ? '★' : '', tabId };
+  const badgeColorDetails = { color: '#4f46e5', tabId };
+  const titleDetails = { title: isBookmarked ? '已收藏至书签 (截屏书签)' : '添加截屏书签', tabId };
 
   if (chrome.action.setIcon) {
     chrome.action.setIcon(iconDetails, () => {

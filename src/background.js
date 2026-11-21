@@ -1,7 +1,17 @@
-import { checkUrlBookmarked, setExtensionBookmarkIcon, refreshActiveTabIcon, saveToShioriFolder, removeFromShioriFolder } from './services/nativeBookmarkSync.js';
+import { checkUrlBookmarked, setExtensionBookmarkIcon, clearGlobalBadge, refreshActiveTabIcon, saveToShioriFolder, removeFromShioriFolder } from './services/nativeBookmarkSync.js';
 import { remoteAddBookmark, remoteDeleteBookmark, openRemoteLibraries } from './services/shioriApi.js';
 
 console.log('CutBookmark 2.0 Background Service Worker 初始化');
+
+// 启动时确保清空全局默认徽章，防止新标签页无意继承五角星
+clearGlobalBadge();
+
+// 标签页新建时，确保初始化为未收藏状态（无五角星徽章）
+chrome.tabs.onCreated?.addListener((tab) => {
+  if (tab?.id) {
+    setExtensionBookmarkIcon(false, tab.id);
+  }
+});
 
 // 标签页切换时自动检测收藏状态并切换图标
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
@@ -18,11 +28,31 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   }
 });
 
-// 标签页完成加载/URL 改变时检测
+// 标签页更新与 URL 导航监听：加载中立即清除五角星，拿到有效 URL 立即后台检索识别
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
-    const isBookmarked = await checkUrlBookmarked(tab.url);
-    setExtensionBookmarkIcon(isBookmarked, tabId);
+  const targetUrl = changeInfo.url || tab?.url;
+
+  // 1. 开始导航或加载时，先立即重置为无徽章（绝不残留旧页面的五角星）
+  if (changeInfo.status === 'loading') {
+    setExtensionBookmarkIcon(false, tabId);
+  }
+
+  // 2. 内部原生页面无需检索
+  if (!targetUrl || targetUrl.startsWith('chrome://') || targetUrl.startsWith('about:')) {
+    setExtensionBookmarkIcon(false, tabId);
+    return;
+  }
+
+  // 3. 一旦有有效网址，后台立即异步检索书签库并设置，无需死等页面全部大图脚本下载完毕
+  try {
+    const isBookmarked = await checkUrlBookmarked(targetUrl);
+    // 校验当前 tab 的 url 是否仍然为目标 url，避免快速重定向时误标
+    const latestTab = await chrome.tabs.get(tabId).catch(() => null);
+    if (latestTab && latestTab.url === targetUrl) {
+      setExtensionBookmarkIcon(isBookmarked, tabId);
+    }
+  } catch (e) {
+    // 忽略异常
   }
 });
 
@@ -73,7 +103,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
           // 1. 本地书签文件夹同步
           await saveToShioriFolder(url, title);
-          setExtensionBookmarkIcon(true);
+          setExtensionBookmarkIcon(true, tab?.id);
 
           // 2. 远程 API 同步 (若未传截图则尝试通过 background 兜底截屏)
           let imgbase64 = request.imgbase64 || '';
@@ -115,7 +145,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
           // 1. 本地书签文件夹移除
           await removeFromShioriFolder(url);
-          setExtensionBookmarkIcon(false);
+          setExtensionBookmarkIcon(false, tab?.id);
 
           // 2. 远程 API 同步删除
           const res = await remoteDeleteBookmark(url);

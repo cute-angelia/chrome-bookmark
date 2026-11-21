@@ -102,3 +102,35 @@ test('setExtensionBookmarkIcon switches icon path, badge and title between bookm
   assert.equal(badgeDetails.text, '');
   assert.equal(titleDetails.title.includes('添加'), true);
 });
+
+test('setExtensionBookmarkIcon without tabId queries active tab and clearGlobalBadge empties badge text', () => {
+  let badgeCalls = [];
+  let queried = false;
+
+  globalThis.chrome = {
+    tabs: {
+      query: (filter, cb) => {
+        queried = true;
+        cb([{ id: 999 }]);
+      }
+    },
+    bookmarks: {},
+    action: {
+      setIcon: (details, cb) => { cb?.(); },
+      setBadgeText: (details, cb) => { badgeCalls.push(details); cb?.(); },
+      setBadgeBackgroundColor: (details, cb) => { cb?.(); },
+      setTitle: (details, cb) => { cb?.(); }
+    }
+  };
+
+  // 1. clearGlobalBadge 显式清空全局 Badge
+  sync.clearGlobalBadge();
+  assert.equal(badgeCalls[0].text, '');
+  assert.equal(badgeCalls[0].tabId, undefined);
+
+  // 2. 未传 tabId 时，自动委托给当前激活标签页设置，杜绝全局 Badge 污染
+  sync.setExtensionBookmarkIcon(true);
+  assert.equal(queried, true);
+  assert.equal(badgeCalls[1].text, '★');
+  assert.equal(badgeCalls[1].tabId, 999);
+});
