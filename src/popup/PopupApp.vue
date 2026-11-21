@@ -127,7 +127,7 @@
             />
           </div>
 
-          <div class="flex items-center gap-1 flex-wrap pt-0.5">
+          <div v-if="selectedTags.length > 0" class="flex items-center gap-1 flex-wrap pt-0.5">
             <span
               v-for="tag in selectedTags"
               :key="tag"
@@ -137,6 +137,17 @@
               <button @click="removeTag(tag)" class="hover:text-indigo-900 cursor-pointer text-xs">×</button>
             </span>
           </div>
+        </div>
+
+        <!-- Notes Input -->
+        <div class="flex items-center space-x-1">
+          <FileText class="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <input
+            v-model="pageNotes"
+            @keydown.enter.prevent="saveBookmark"
+            placeholder="添加笔记备注 (回车快捷保存)..."
+            class="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
         </div>
       </div>
     </div>
@@ -167,7 +178,7 @@
 import { ref, computed, onMounted } from 'vue';
 import {
   Camera, Globe, Folder, Tag, BookmarkCheck, LayoutGrid,
-  ExternalLink, CheckCircle2
+  ExternalLink, CheckCircle2, FileText
 } from 'lucide-vue-next';
 import { getCurrentPageInfo, captureCurrentTab } from '../services/bookmarkService.js';
 import { isChromeExtension, getStoredBookmarks, saveStoredBookmarks, getStoredFolders, showToast, moveToTrashStorage } from '../services/bookmarkStorage.js';
@@ -181,6 +192,7 @@ import { readChromeLibrary, normalizeBookmarkUrl, aggregateBookmarksByUrl } from
 const pageTitle = ref('');
 const pageUrl = ref('');
 const pageTabId = ref(null);
+const pageNotes = ref('');
 const screenshotUrl = ref('');
 const screenshotError = ref('');
 const folderOptions = ref([]);
@@ -251,6 +263,9 @@ async function initPage() {
     isCurrentBookmarked.value = true;
     if (Array.isArray(existing.tags)) {
       selectedTags.value = [...existing.tags];
+    }
+    if (existing.notes) {
+      pageNotes.value = existing.notes;
     }
     if (existing.folderId && folderOptions.value.some(f => f.id === existing.folderId)) {
       selectedFolderId.value = existing.folderId;
@@ -362,6 +377,8 @@ async function saveBookmark() {
     const folderPath = selectedOpt?.path || selectedOpt?.name || '其他书签';
     const folderId = selectedFolderId.value || (nativeNode ? `chrome:${nativeNode.parentId}` : 'default');
 
+    const notesValue = pageNotes.value ? pageNotes.value.trim() : '';
+
     const newBm = {
       id: nativeNode ? `chrome:${nativeNode.id}` : `bm-${Date.now()}`,
       nativeId: nativeNode?.id || undefined,
@@ -375,7 +392,7 @@ async function saveBookmark() {
       tags: [...selectedTags.value],
       screenshot: screenshotUrl.value,
       color: '#6366f1',
-      notes: '来自快捷弹窗保存',
+      notes: notesValue,
       dateAdded: Date.now(),
       pinned: false,
       visits: 1
@@ -388,11 +405,17 @@ async function saveBookmark() {
       list[existingIdx] = Object.assign({}, list[existingIdx], newBm, {
         id: nativeNode ? `chrome:${nativeNode.id}` : list[existingIdx].id,
         visits: list[existingIdx].visits || 1,
-        pinned: list[existingIdx].pinned || false
+        pinned: list[existingIdx].pinned || false,
+        notes: notesValue
       });
     } else {
       list.unshift(newBm);
     }
+    list.forEach(b => {
+      if (normalizeBookmarkUrl(b.url) === normUrl) {
+        b.notes = notesValue;
+      }
+    });
     await saveStoredBookmarks(aggregateBookmarksByUrl(list));
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -459,6 +482,8 @@ async function handleRemoveBookmark() {
     // 3. 重置图标与状态
     setExtensionBookmarkIcon(false, pageTabId.value);
     isCurrentBookmarked.value = false;
+    pageNotes.value = '';
+    selectedTags.value = [];
     showToast('书签已移入回收站');
 
     setTimeout(() => {
