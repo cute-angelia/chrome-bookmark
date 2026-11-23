@@ -2,17 +2,6 @@
   <div class="h-full min-h-0 min-w-[1040px] flex bg-white overflow-hidden">
     <!-- 栏目 1: 左侧导航控制台 (Sidebar) -->
     <aside class="w-80 bg-slate-50 text-slate-700 flex flex-col shrink-0 border-r border-slate-200 select-none">
-      <!-- 快捷统计与添加按钮 -->
-      <div class="px-3 py-3 border-b border-slate-200 bg-white">
-        <button
-          @click="showCreateModal = true"
-          class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 shadow-sm shadow-indigo-200 transition cursor-pointer"
-        >
-          <Plus class="w-3.5 h-3.5" />
-          <span>添加书签</span>
-        </button>
-      </div>
-
       <!-- 智能视图与目录列表 (可滚动) -->
       <div class="flex-1 overflow-y-auto px-3 py-3 space-y-4">
         <!-- 智能过滤视图 -->
@@ -373,14 +362,14 @@
           @dragstart="handleBookmarkDragStart($event, bm)"
           @dragend="handleBookmarkDragEnd"
           @click="selectBookmark(bm.id, $event)"
-          class="p-2.5 rounded-2xl border transition cursor-pointer flex gap-3 group relative select-none"
+          class="p-2.5 rounded-2xl border transition cursor-pointer flex gap-3 group relative select-none [content-visibility:auto] [contain-intrinsic-size:auto_76px]"
           :class="[
-            selectedBatchIds.includes(bm.id)
+            selectedBatchIdSet.has(bm.id)
               ? 'bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-400/50 shadow-xs'
               : selectedBookmarkId === bm.id
                 ? 'bg-indigo-50/60 border-indigo-300 shadow-xs'
                 : 'bg-white border-slate-200/80 hover:border-slate-300',
-            draggedBookmarkIds.includes(bm.id) ? 'opacity-40 scale-[0.98] border-dashed border-indigo-400 bg-indigo-50/50' : ''
+            draggedBookmarkIdSet.has(bm.id) ? 'opacity-40 scale-[0.98] border-dashed border-indigo-400 bg-indigo-50/50' : ''
           ]"
         >
           <!-- 批量选择框 -->
@@ -487,7 +476,11 @@
                 {{ activeBookmark.folder }}
               </span>
               <span class="text-[11px] text-slate-400 font-mono whitespace-nowrap min-w-0 truncate">
-                {{ new Date(activeBookmark.dateAdded).toLocaleDateString() }} 录入 · 累计 <strong class="text-indigo-600">{{ activeBookmark.visits || 1 }}</strong> 次访问
+                {{ new Date(activeBookmark.dateAdded).toLocaleDateString() }} 录入
+                <template v-if="activeBookmark.lastVisited">
+                  · 最近访问: <span class="text-slate-600 font-medium" :title="new Date(activeBookmark.lastVisited).toLocaleString()">{{ formatRelativeVisitTime(activeBookmark.lastVisited) }}</span>
+                </template>
+                · 累计 <strong class="text-indigo-600">{{ activeBookmark.visits || 1 }}</strong> 次访问
               </span>
             </div>
             <div v-if="isCurrentInTrash" class="flex items-center gap-1.5 shrink-0">
@@ -597,6 +590,45 @@
 
         <!-- 全宽属性编辑区（单栏堆叠） -->
         <section class="flex-1 bg-white px-4 py-4 space-y-5">
+          <!-- 书签标题 -->
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1.5">书签标题</label>
+            <input
+              v-model="activeBookmark.title"
+              @blur="handleActiveBookmarkChange"
+              @keydown.enter="onTitleOrUrlEnter"
+              class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="输入书签标题…"
+            />
+          </div>
+
+          <!-- 书签网址 (URL) -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs font-bold text-slate-600">网址 (URL)</label>
+              <span class="text-[10px] text-slate-400">失焦或回车自动保存</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <input
+                v-model="activeBookmark.url"
+                @blur="handleActiveBookmarkChange"
+                @keydown.enter="onTitleOrUrlEnter"
+                class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                placeholder="https://…"
+              />
+              <a
+                :href="activeBookmark.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click="recordVisit(activeBookmark.id)"
+                class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl border border-slate-200 transition shrink-0"
+                title="在新标签页测试打开"
+              >
+                <ExternalLink class="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+
           <!-- 分类文件夹 -->
           <div>
             <label class="block text-xs font-bold text-slate-600 mb-1.5">{{ isExtEnv ? '整理到 Chrome 文件夹' : '分类文件夹' }}</label>
@@ -762,7 +794,7 @@ import {
 } from '../services/bookmarkStorage.js';
 import { getServerConfig, fetchRemoteBookmarkUpdates, fetchRemoteBookmarkByUrl, remoteAddBookmark, remoteDeleteBookmark } from '../services/shioriApi.js';
 import { saveToShioriFolder, findNativeBookmarkMatches, moveNativeBookmark } from '../services/nativeBookmarkSync.js';
-import { readChromeLibrary, normalizeRemoteBookmarks, mergeLibraryBookmarks, mergeRemoteBookmarks, reconcileRecords, mergeSourceFolders, aggregateBookmarksByUrl, normalizeBookmarkUrl } from '../services/bookmarkLibrary.js';
+import { readChromeLibrary, normalizeRemoteBookmarks, mergeLibraryBookmarks, mergeRemoteBookmarks, reconcileRecords, mergeSourceFolders, aggregateBookmarksByUrl, normalizeBookmarkUrl, domainOf } from '../services/bookmarkLibrary.js';
 import { captureBookmark } from '../services/bookmarkService.js';
 
 const emit = defineEmits(['connection-state']);
@@ -772,6 +804,7 @@ const isExtEnv = computed(() => isChromeExtension());
 const bookmarks = ref([]);
 const folders = ref([]);
 const serverConfig = ref({});
+const remoteTotalCount = ref(null);
 const showServerModal = ref(false);
 
 const connectionState = ref('disconnected');
@@ -780,13 +813,26 @@ const editableFolders = computed(() => folders.value.filter(folder => !folder.so
 const nativeFolders = computed(() => folders.value.filter(folder => folder.source === 'chrome'));
 const movingBookmark = ref(false);
 
-function setConnectionState(state) {
+function computeServiceType() {
+  if (serverConfig.value?.serviceType) {
+    return serverConfig.value.serviceType;
+  }
+  if (serverConfig.value?.isPro) {
+    return 'cloud';
+  }
+  return 'selfhosted';
+}
+
+function setConnectionState(state, type) {
   connectionState.value = state;
-  emit('connection-state', state);
+  const currentType = type || computeServiceType();
+  emit('connection-state', state, currentType);
 }
 
 function onServerStatusChange(cfg) {
   serverConfig.value = cfg;
+  const type = cfg.serviceType || (cfg.isPro ? 'cloud' : 'selfhosted');
+  setConnectionState(connectionState.value, type);
   refreshRemote();
 }
 
@@ -799,9 +845,11 @@ const isCompactView = ref(false);
 
 const isBatchMode = ref(false);
 const selectedBatchIds = ref([]);
+const selectedBatchIdSet = computed(() => new Set(selectedBatchIds.value));
 
 const draggedBookmarkId = ref(null);
 const draggedBookmarkIds = ref([]);
+const draggedBookmarkIdSet = computed(() => new Set(draggedBookmarkIds.value));
 const dragOverFolderId = ref(null);
 const draggedFolderId = ref(null);
 const dragOverFolderSortTarget = ref(null);
@@ -932,8 +980,11 @@ function isInFolder(bookmark, folder) {
       (bookmark.isRemote && (!bookmark.server || folder.id === `remote:${bookmark.server}`));
   }
   // 仅匹配直属于该文件夹的书签，排除子文件夹内的书签
-  return bookmark.folderId === folder.id || bookmark.nativeFolderId === folder.id ||
-    (!folder.source && !bookmark.folderId && bookmark.folder === folder.name);
+  const targetFolderId = bookmark.folderId || bookmark.nativeFolderId;
+  if (targetFolderId) {
+    return targetFolderId === folder.id;
+  }
+  return !folder.source && bookmark.folder === folder.name;
 }
 
 const folderCounts = computed(() => {
@@ -942,10 +993,53 @@ const folderCounts = computed(() => {
   for (const f of folderList) {
     counts.set(f.id, 0);
   }
+
+  // 预建索引，以 O(1) 替代 O(M) 遍历匹配
+  const customFolderByName = new Map();
+  for (const f of folderList) {
+    if (!f.source && f.name) {
+      customFolderByName.set(f.name, f.id);
+    }
+  }
+
   for (const b of bookmarks.value) {
+    let matched = false;
+    if (b.folderId && counts.has(b.folderId)) {
+      counts.set(b.folderId, counts.get(b.folderId) + 1);
+      matched = true;
+    } else if (b.nativeFolderId && counts.has(b.nativeFolderId)) {
+      counts.set(b.nativeFolderId, counts.get(b.nativeFolderId) + 1);
+      matched = true;
+    }
+
+    if (!matched && !b.folderId && b.folder) {
+      const fid = customFolderByName.get(b.folder);
+      if (fid && counts.has(fid)) {
+        counts.set(fid, counts.get(fid) + 1);
+      }
+    }
+
+    // 远程书签分类独立统计：所有归属于远程的书签（即便已被关联/归入 Chrome 本地目录）均计入远程书签数量
+    if (b.isRemote || b.source === 'remote' || b.remoteId != null) {
+      const remoteId = b.server ? `remote:${b.server}` : (b.remoteFolderId || null);
+      if (remoteId && counts.has(remoteId)) {
+        counts.set(remoteId, counts.get(remoteId) + 1);
+      } else {
+        for (const f of folderList) {
+          if (f.source === 'remote') {
+            counts.set(f.id, counts.get(f.id) + 1);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 若服务端接口直接提供了权威总数 total，以接口权威总数为准
+  if (remoteTotalCount.value != null) {
     for (const f of folderList) {
-      if (isInFolder(b, f)) {
-        counts.set(f.id, (counts.get(f.id) || 0) + 1);
+      if (f.source === 'remote') {
+        counts.set(f.id, remoteTotalCount.value);
       }
     }
   }
@@ -1333,6 +1427,110 @@ async function persistActiveBookmark() {
   await persistBookmark(activeBookmark.value);
 }
 
+let lastSavedTitle = '';
+let lastSavedUrl = '';
+
+watch(() => activeBookmark.value?.id, () => {
+  if (activeBookmark.value) {
+    lastSavedTitle = activeBookmark.value.title || '';
+    lastSavedUrl = activeBookmark.value.url || '';
+  }
+}, { immediate: true });
+
+function onTitleOrUrlEnter(event) {
+  if (event.isComposing) return;
+  event.target?.blur?.();
+}
+
+async function handleActiveBookmarkChange() {
+  const current = activeBookmark.value;
+  if (!current) return;
+
+  const newTitle = (current.title || '').trim();
+  let rawUrl = (current.url || '').trim();
+
+  if (!rawUrl) {
+    showToast('网址不能为空');
+    current.url = lastSavedUrl;
+    return;
+  }
+
+  if (!/^https?:\/\//i.test(rawUrl)) {
+    rawUrl = 'https://' + rawUrl;
+  }
+
+  try {
+    new URL(rawUrl);
+  } catch {
+    showToast('请输入有效的网址');
+    current.url = lastSavedUrl;
+    return;
+  }
+
+  current.title = newTitle || rawUrl;
+  current.url = rawUrl;
+  current.domain = domainOf(rawUrl);
+
+  if (current.title === lastSavedTitle && current.url === lastSavedUrl) {
+    return;
+  }
+
+  const oldUrl = lastSavedUrl;
+  lastSavedTitle = current.title;
+  lastSavedUrl = current.url;
+
+  let nativeId = current.nativeId;
+  if (!nativeId && current.id?.startsWith('chrome:')) {
+    nativeId = current.id.slice('chrome:'.length);
+  }
+
+  if (isChromeExtension() && typeof chrome !== 'undefined' && chrome.bookmarks?.update) {
+    try {
+      if (nativeId) {
+        await new Promise((resolve) => {
+          try {
+            const res = chrome.bookmarks.update(nativeId, {
+              title: current.title,
+              url: current.url
+            }, resolve);
+            if (res instanceof Promise) res.then(resolve).catch(resolve);
+          } catch {
+            resolve();
+          }
+        });
+      } else if (oldUrl) {
+        const matches = await new Promise((resolve) => {
+          try {
+            const res = chrome.bookmarks.search({ url: oldUrl }, resolve);
+            if (res instanceof Promise) res.then(resolve).catch(() => resolve([]));
+          } catch {
+            resolve([]);
+          }
+        });
+        if (matches && matches.length > 0) {
+          await new Promise((resolve) => {
+            try {
+              const res = chrome.bookmarks.update(matches[0].id, {
+                title: current.title,
+                url: current.url
+              }, resolve);
+              if (res instanceof Promise) res.then(resolve).catch(resolve);
+            } catch {
+              resolve();
+            }
+          });
+          current.nativeId = matches[0].id;
+        }
+      }
+    } catch (err) {
+      console.warn('Chrome bookmark update failed:', err);
+    }
+  }
+
+  await persistActiveBookmark();
+  showToast('书签信息已更新');
+}
+
 function togglePin(id) {
   const bm = bookmarks.value.find(b => b.id === id);
   if (bm) {
@@ -1504,23 +1702,28 @@ async function moveBookmarksBatchToFolder(bookmarksList, folder) {
           if (current) {
             current.nativeId = moved.id;
             current.nativeFolderId = folder.id;
-            if (!current.source) {
-              current.folderId = folder.id;
-              current.folder = folder.path || folder.name;
-              current.ancestorIds = [];
-              let ancestor = folder;
-              while (ancestor) {
-                current.ancestorIds.unshift(ancestor.id);
-                ancestor = nativeFolders.value.find(item => item.id === ancestor.parentId);
-              }
+            current.folderId = folder.id;
+            current.folder = folder.path || folder.name;
+            current.ancestorIds = [];
+            let ancestor = folder;
+            while (ancestor) {
+              current.ancestorIds.unshift(ancestor.id);
+              ancestor = folders.value.find(item => item.id === ancestor.parentId);
             }
           }
         } catch (itemErr) {
           console.warn('Move bookmark item failed:', bm.title, itemErr);
         }
       }
-      await refreshChrome(true);
-      await persistChanges();
+      // 增量同步受影响书签到 IndexedDB，彻底避免全量序列化 3000 条书签导致主线程假死卡顿
+      for (const bm of bookmarksList) {
+        const current = bookmarks.value.find(item => item.id === bm.id);
+        if (current) {
+          updateStoredBookmark(current).catch(() => {});
+        }
+      }
+      // 节流 Chrome diff，避免 Chrome 内部 onMoved 事件二次触发全量刷新
+      lastChromeDiffTime = Date.now();
     } else {
       // 纯本地/自定义文件夹
       for (const bm of bookmarksList) {
@@ -1529,9 +1732,9 @@ async function moveBookmarksBatchToFolder(bookmarksList, folder) {
           current.folderId = folder.id;
           current.folder = folder.name;
           current.ancestorIds = [folder.id];
+          updateStoredBookmark(current).catch(() => {});
         }
       }
-      await persistChanges();
     }
 
     const count = bookmarksList.length;
@@ -1643,7 +1846,9 @@ function getFolderSubtree(folderId) {
   while (added) {
     added = false;
     for (const f of folders.value) {
-      if (f.parentId && childIds.has(f.parentId) && !childIds.has(f.id)) {
+      const isChildByParent = f.parentId && childIds.has(f.parentId);
+      const isChildByPath = root.path && f.path && f.path.startsWith(root.path + ' / ');
+      if ((isChildByParent || isChildByPath) && !childIds.has(f.id)) {
         childIds.add(f.id);
         added = true;
       }
@@ -1733,20 +1938,24 @@ function handleFolderDragOver(event, folder) {
   if (draggedFolderId.value) {
     // 正在拖拽文件夹进行排序
     if (draggedFolderId.value === folder.id || isFolderDescendant(folder.id, draggedFolderId.value)) {
-      dragOverFolderSortTarget.value = null;
+      if (dragOverFolderSortTarget.value) dragOverFolderSortTarget.value = null;
       return;
     }
     event.dataTransfer.dropEffect = 'move';
     const rect = event.currentTarget.getBoundingClientRect();
     const relY = event.clientY - rect.top;
     const position = relY < rect.height / 2 ? 'before' : 'after';
-    dragOverFolderSortTarget.value = { id: folder.id, position };
-    dragOverFolderId.value = null;
+    if (!dragOverFolderSortTarget.value || dragOverFolderSortTarget.value.id !== folder.id || dragOverFolderSortTarget.value.position !== position) {
+      dragOverFolderSortTarget.value = { id: folder.id, position };
+    }
+    if (dragOverFolderId.value !== null) dragOverFolderId.value = null;
   } else if (draggedBookmarkId.value || draggedBookmarkIds.value.length > 0) {
     // 正在拖拽书签移入文件夹
     event.dataTransfer.dropEffect = 'move';
-    dragOverFolderId.value = folder.id;
-    dragOverFolderSortTarget.value = null;
+    if (dragOverFolderId.value !== folder.id) {
+      dragOverFolderId.value = folder.id;
+    }
+    if (dragOverFolderSortTarget.value !== null) dragOverFolderSortTarget.value = null;
   }
 }
 
@@ -1810,10 +2019,30 @@ async function handleFolderDrop(event, folder) {
   await reorderFolders(srcFolder, folder, sortTarget.position);
 }
 
+function formatRelativeVisitTime(timestamp) {
+  if (!timestamp) return '';
+  const now = Date.now();
+  const diff = Math.max(0, now - timestamp);
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(diff / 3600000);
+  if (hours < 24) return `${hours}小时前`;
+  const days = Math.floor(diff / 86400000);
+  if (days < 7) return `${days}天前`;
+  return new Date(timestamp).toLocaleDateString();
+}
+
 function recordVisit(id) {
   const bm = bookmarks.value.find(b => b.id === id);
   if (bm) {
+    const now = Date.now();
+    const THIRTY_MINUTES = 30 * 60 * 1000;
+    if (bm.lastVisited && (now - bm.lastVisited) < THIRTY_MINUTES) {
+      return;
+    }
     bm.visits = (bm.visits || 0) + 1;
+    bm.lastVisited = now;
     persistBookmark(bm);
   }
 }
@@ -2153,13 +2382,17 @@ async function deleteFolderAction(folder) {
     return;
   }
 
-  const count = folderCounts.value.get(folder.id) || 0;
+  // 递归获取自身及所有子孙文件夹
+  const subtreeFolders = getFolderSubtree(folder.id);
+  const subtreeIds = new Set(subtreeFolders.map(f => f.id));
+  // 递归汇总当前文件夹及所有子孙文件夹包含的书签总数
+  const totalCount = subtreeFolders.reduce((sum, f) => sum + (folderCounts.value.get(f.id) || 0), 0);
 
   // 如果里面还有书签，提示是否将里面书签一起删除；点取消就不要删了
-  if (count > 0) {
+  if (totalCount > 0) {
     const result = await Swal.fire({
       title: `删除文件夹「${folder.name}」`,
-      text: `该文件夹下还有 ${count} 个书签，是否将里面的书签一起删除？`,
+      html: `该目录下共有 <strong style="color: #e11d48; font-weight: 700;">${totalCount} 个书签</strong>，是否将里面的书签一起删除？`,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: '确定一起删除',
@@ -2173,7 +2406,7 @@ async function deleteFolderAction(folder) {
   } else {
     const result = await Swal.fire({
       title: `确定要删除文件夹「${folder.name}」吗？`,
-      text: '该空文件夹将被移除。',
+      text: '该文件夹为空，将被移除。',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: '确定删除',
@@ -2198,11 +2431,11 @@ async function deleteFolderAction(folder) {
       scheduleChromeRefresh();
     } else {
       // 1. 删除该文件夹及其子树下的书签
-      const subtreeIds = new Set(getFolderSubtree(folder.id).ids);
+      const subtreeNames = new Set(subtreeFolders.map(f => f.name));
       const insideBmIds = new Set(bookmarks.value.filter(b => {
-        if (isInFolder(b, folder)) return true;
         if (b.folderId && subtreeIds.has(b.folderId)) return true;
         if (b.nativeFolderId && subtreeIds.has(b.nativeFolderId)) return true;
+        if (!b.folderId && b.folder && subtreeNames.has(b.folder)) return true;
         if (b.ancestorIds?.some(id => subtreeIds.has(id))) return true;
         return false;
       }).map(b => b.id));
@@ -2214,14 +2447,15 @@ async function deleteFolderAction(folder) {
       bookmarks.value = bookmarks.value.filter(b => !insideBmIds.has(b.id));
       await persistChanges();
 
-      // 2. 从文件夹列表中删除
-      handleDeleteFolder(folder.id);
+      // 2. 从文件夹列表中删除该文件夹及其所有子文件夹
+      folders.value = folders.value.filter(f => !subtreeIds.has(f.id));
+      await saveStoredFolders(folders.value);
     }
 
-    if (selectedFolderFilter.value === folder.id) {
+    if (subtreeIds.has(selectedFolderFilter.value)) {
       selectedFolderFilter.value = '';
     }
-    showToast(count > 0 ? `已删除文件夹及内部 ${count} 个书签` : `已删除文件夹「${folder.name}」`);
+    showToast(totalCount > 0 ? `已删除文件夹及内部 ${totalCount} 个书签` : `已删除文件夹「${folder.name}」`);
   } catch (error) {
     showToast(`删除失败: ${error.message}`, 'error');
   }
@@ -2403,8 +2637,11 @@ async function loadRemote() {
   try {
     // 包含复合书签（如本地关联了远程的书签或带有 remoteId 的书签），以便 fetchRemoteBookmarkUpdates 能获取全部已知远程 ID
     const cached = bookmarks.value.filter(b => (b.source === 'remote' || b.isRemote || b.remoteId != null) && (!b.server || b.server === server));
-    const { bookmarks: records, complete } = await fetchRemoteBookmarkUpdates(config, cached);
+    const { bookmarks: records, complete, total } = await fetchRemoteBookmarkUpdates(config, cached);
     if (disposed || generation !== remoteGeneration) return;
+    if (total != null && !Number.isNaN(total)) {
+      remoteTotalCount.value = total;
+    }
     const merged = mergeLibraryBookmarks(bookmarks.value, [
       ...bookmarks.value.filter(b => b.source === 'chrome'),
       ...mergeRemoteBookmarks(cached, normalizeRemoteBookmarks(records, server), complete)
@@ -2450,6 +2687,7 @@ async function manualSyncRemote() {
 
 defineExpose({
   openServerSettings: () => { showServerModal.value = true; },
+  openCreateModal: () => { showCreateModal.value = true; },
   manualSyncRemote,
   isManualSyncing
 });
@@ -2460,7 +2698,15 @@ async function reloadConfig(force = false) {
 }
 
 function handleRuntimeMessage(message, sender, sendResponse) {
-  if (message?.type === 'BOOKMARK_UPDATED') {
+  if (message?.type === 'BOOKMARK_VISITED') {
+    const { id, url, visits, lastVisited } = message.payload || {};
+    const norm = url ? normalizeBookmarkUrl(url) : '';
+    const targets = bookmarks.value.filter(b => (id && b.id === id) || (norm && normalizeBookmarkUrl(b.url) === norm));
+    for (const b of targets) {
+      b.visits = visits;
+      b.lastVisited = lastVisited;
+    }
+  } else if (message?.type === 'BOOKMARK_UPDATED') {
     (async () => {
       const storedList = await getStoredBookmarks();
       if (storedList && storedList.length > 0) {
@@ -2503,11 +2749,45 @@ onMounted(async () => {
     pendingTargetUrl = initialUrl;
   }
 
-  const storedList = await getStoredBookmarks();
-  bookmarks.value = aggregateBookmarksByUrl(storedList);
-  folders.value = await getStoredFolders();
-  serverConfig.value = await getServerConfig();
-  trashBookmarks.value = await getTrashBookmarks();
+  // 1. 并行读取持久化数据与 Chrome 原生书签树，首屏一次性对齐呈现，杜绝二次刷新造成的顺序颠倒与闪烁
+  const [storedList, storedFolders, chromeLib, serverCfg, trashList] = await Promise.all([
+    getStoredBookmarks(),
+    getStoredFolders(),
+    isChromeExtension() ? readChromeLibrary() : Promise.resolve(null),
+    getServerConfig(),
+    getTrashBookmarks()
+  ]);
+
+  serverConfig.value = serverCfg;
+  trashBookmarks.value = trashList;
+
+  if (isChromeExtension()) {
+    chrome.storage.local.get(['cutbookmark_service_type', 'cutbookmark_is_pro', 'cutbookmark_license_key'], (res) => {
+      if (res?.cutbookmark_service_type === 'cloud' || res?.cutbookmark_is_pro || res?.cutbookmark_license_key) {
+        serverConfig.value.serviceType = 'cloud';
+      } else {
+        serverConfig.value.serviceType = 'selfhosted';
+      }
+      setConnectionState(connectionState.value, serverConfig.value.serviceType);
+    });
+  }
+
+  if (chromeLib) {
+    lastChromeDiffTime = Date.now();
+    const baseStored = storedList && storedList.length > 0 ? storedList : [];
+    const merged = mergeLibraryBookmarks(baseStored, [
+      ...baseStored.filter(b => b.source === 'remote' || b.isRemote), ...chromeLib.bookmarks
+    ]);
+    bookmarks.value = reconcileRecords([], aggregateBookmarksByUrl(merged));
+    folders.value = mergeSourceFolders(storedFolders || [], chromeLib.folders, 'chrome');
+    // 静默在后台持久化最新对齐状态
+    persistChanges().catch(() => {});
+    saveStoredFolders(folders.value).catch(() => {});
+    setLastBookmarkSyncTime(Date.now()).catch(() => {});
+  } else {
+    bookmarks.value = aggregateBookmarksByUrl(storedList || []);
+    folders.value = storedFolders || [];
+  }
 
   let targetMatched = false;
   if (pendingTargetUrl) {
@@ -2532,8 +2812,8 @@ onMounted(async () => {
   window.addEventListener('click', closeFolderContextMenu);
   window.addEventListener('scroll', closeFolderContextMenu, true);
   window.addEventListener('keydown', onGlobalKeyDown);
-  // 初次加载：首屏本地缓存已就地展现，后台非阻塞静默对比 Chrome 原生书签与远程服务
-  refreshChrome(false);
+
+  // 后台静默对齐远程自建服务
   refreshRemote();
 });
 

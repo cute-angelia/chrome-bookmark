@@ -1,4 +1,4 @@
-import { isChromeExtension, getStoredBookmarks } from './bookmarkStorage.js';
+import { isChromeExtension, getStoredBookmarks, updateStoredBookmark } from './bookmarkStorage.js';
 import { normalizeBookmarkUrl } from './bookmarkLibrary.js';
 
 const DEFAULT_FOLDER_NAME = 'CutBookmark';
@@ -268,4 +268,98 @@ export async function refreshActiveTabIcon() {
   } catch (e) {
     //
   }
+}
+
+/**
+ * 当检测到 URL 被打开且匹配书签时记录访问，30分钟内重复打开不计数
+ * @param {string} url
+ * @returns {Promise<{ counted: boolean, bookmark: object | null }>}
+ */
+export async function recordBookmarkVisitIfMatched(url) {
+  if (!url || typeof url !== 'string') return { counted: false, bookmark: null };
+  const normTarget = normalizeBookmarkUrl(url);
+  if (!normTarget) return { counted: false, bookmark: null };
+
+  const THIRTY_MINUTES = 30 * 60 * 1000;
+  const now = Date.now();
+
+  // 1. 先检索本地 IndexedDB 书签库
+  let matchedBookmark = null;
+  try {
+    const stored = await getStoredBookmarks();
+    if (stored && stored.length > 0) {
+      matchedBookmark = stored.find(b => normalizeBookmarkUrl(b.url) === normTarget);
+    }
+  } catch (e) {
+    // 忽略异常
+  }
+
+  // 2. 若本地无记录，检索 Chrome 原生书签树
+  if (!matchedBookmark && isChromeExtension() && chrome.bookmarks?.search) {
+    try {
+      let results = await new Promise((resolve) => {
+        chrome.bookmarks.search({ url }, items => resolve(items || []));
+      });
+      if (!results || results.length === 0) {
+        if (normTarget !== url) {
+          results = await new Promise((resolve) => {
+            chrome.bookmarks.search({ url: normTarget }, items => resolve(items || []));
+          });
+        }
+      }
+      if (results && results.length > 0) {
+        const nativeNode = results[0];
+        matchedBookmark = {
+          id: `chrome:${nativeNode.id}`,
+          nativeId: nativeNode.id,
+          folderId: `chrome:${nativeNode.parentId}`,
+          nativeFolderId: nativeNode.parentId,
+          title: nativeNode.title || nativeNode.url,
+          url: nativeNode.url,
+          source: 'chrome',
+          isNative: true,
+          visits: 0,
+          dateAdded: nativeNode.dateAdded || now
+        };
+      }
+    } catch (e) {
+      // 忽略异常
+    }
+  }
+
+  if (!matchedBookmark) {
+    return { counted: false, bookmark: null };
+  }
+
+  // 3. 30 分钟防抖判定：30分钟内重复打开不算计数
+  if (matchedBookmark.lastVisited && (now - matchedBookmark.lastVisited < THIRTY_MINUTES)) {
+    return { counted: false, bookmark: matchedBookmark };
+  }
+
+  // 4. 计数 +1，更新最后访问时间
+  matchedBookmark.visits = (matchedBookmark.visits || 0) + 1;
+  matchedBookmark.lastVisited = now;
+
+  try {
+    await updateStoredBookmark(matchedBookmark);
+  } catch (e) {
+    console.warn('Failed to persist bookmark visit:', e);
+  }
+
+  // 5. 跨上下文实时广播
+  if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'BOOKMARK_VISITED',
+        payload: {
+          id: matchedBookmark.id,
+          url: matchedBookmark.url,
+          visits: matchedBookmark.visits,
+          lastVisited: matchedBookmark.lastVisited
+        }
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
+  return { counted: true, bookmark: matchedBookmark };
 }

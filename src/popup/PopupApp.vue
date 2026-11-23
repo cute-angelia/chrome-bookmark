@@ -33,7 +33,7 @@
         <button
           @click="openDashboard"
           class="text-slate-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
-          title="打开三栏管理工作台"
+          title="打开管理页面"
         >
           <LayoutGrid class="w-3.5 h-3.5" />
         </button>
@@ -102,6 +102,7 @@
           <Folder class="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <select
             v-model="selectedFolderId"
+            @change="onFolderChange"
             class="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 truncate"
           >
             <option
@@ -168,7 +169,7 @@
         class="w-full py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-medium flex items-center justify-center space-x-1 border border-slate-200 transition cursor-pointer"
       >
         <LayoutGrid class="w-3.5 h-3.5" />
-        <span>打开三栏管理工作台</span>
+        <span>打开管理页面</span>
       </button>
     </div>
   </div>
@@ -181,13 +182,16 @@ import {
   ExternalLink, CheckCircle2, FileText
 } from 'lucide-vue-next';
 import { getCurrentPageInfo, captureCurrentTab } from '../services/bookmarkService.js';
-import { isChromeExtension, getStoredBookmarks, saveStoredBookmarks, getStoredFolders, showToast, moveToTrashStorage } from '../services/bookmarkStorage.js';
+import {
+  isChromeExtension, getStoredBookmarks, saveStoredBookmarks, getStoredFolders,
+  showToast, moveToTrashStorage, getLastUsedFolderId, setLastUsedFolderId
+} from '../services/bookmarkStorage.js';
 import { getServerConfig, remoteAddBookmark, remoteDeleteBookmark, openRemoteLibraries } from '../services/shioriApi.js';
 import {
   saveToShioriFolder, removeFromShioriFolder, checkUrlInShioriFolder,
   findNativeBookmarkMatches, setExtensionBookmarkIcon
 } from '../services/nativeBookmarkSync.js';
-import { readChromeLibrary, normalizeBookmarkUrl, aggregateBookmarksByUrl } from '../services/bookmarkLibrary.js';
+import { readChromeLibrary, normalizeBookmarkUrl, aggregateBookmarksByUrl, extractDomainTag } from '../services/bookmarkLibrary.js';
 
 const pageTitle = ref('');
 const pageUrl = ref('');
@@ -259,10 +263,13 @@ async function initPage() {
   const list = await getStoredBookmarks();
   const existing = list.find(b => normalizeBookmarkUrl(b.url) === normUrl);
 
+  const defaultDomainTag = extractDomainTag(info.url);
   if (existing) {
     isCurrentBookmarked.value = true;
-    if (Array.isArray(existing.tags)) {
+    if (Array.isArray(existing.tags) && existing.tags.length > 0) {
       selectedTags.value = [...existing.tags];
+    } else if (defaultDomainTag) {
+      selectedTags.value = [defaultDomainTag];
     }
     if (existing.notes) {
       pageNotes.value = existing.notes;
@@ -273,21 +280,31 @@ async function initPage() {
     if (existing.screenshot) {
       screenshotUrl.value = existing.screenshot;
     }
+  } else {
+    // 新增书签时，默认添加无后缀的 domain 标签
+    if (defaultDomainTag) {
+      selectedTags.value = [defaultDomainTag];
+    }
   }
 
-  // 5. 若未匹配到已有归属文件夹，定位本机匹配或常用默认位置
+  // 5. 若未匹配到已有归属文件夹，优先采用记忆的上次选择，兜底使用书签栏
   if (!selectedFolderId.value) {
     const nativeMatches = await findNativeBookmarkMatches({ url: info.url });
     if (nativeMatches && nativeMatches.length > 0) {
       isCurrentBookmarked.value = true;
       selectedFolderId.value = `chrome:${nativeMatches[0].parentId}`;
     } else {
-      const defaultCutBookmark = folderOptions.value.find(f => f.name === 'CutBookmark' || f.name === 'Shiori');
-      if (defaultCutBookmark) {
-        selectedFolderId.value = defaultCutBookmark.id;
+      const lastFolderId = await getLastUsedFolderId();
+      if (lastFolderId && folderOptions.value.some(f => f.id === lastFolderId)) {
+        selectedFolderId.value = lastFolderId;
       } else {
-        const otherBookmarks = folderOptions.value.find(f => f.name === '其他书签');
-        selectedFolderId.value = otherBookmarks ? otherBookmarks.id : folderOptions.value[0]?.id;
+        const bookmarksBar = folderOptions.value.find(f => f.id === 'chrome:1' || f.name === '书签栏');
+        if (bookmarksBar) {
+          selectedFolderId.value = bookmarksBar.id;
+        } else {
+          const otherBookmarks = folderOptions.value.find(f => f.name === '其他书签');
+          selectedFolderId.value = otherBookmarks ? otherBookmarks.id : folderOptions.value[0]?.id;
+        }
       }
     }
   }
@@ -296,6 +313,12 @@ async function initPage() {
 
   if (!screenshotUrl.value) {
     await takeScreenshot();
+  }
+}
+
+function onFolderChange() {
+  if (selectedFolderId.value) {
+    setLastUsedFolderId(selectedFolderId.value).catch(() => {});
   }
 }
 
@@ -417,6 +440,9 @@ async function saveBookmark() {
       }
     });
     await saveStoredBookmarks(aggregateBookmarksByUrl(list));
+    if (selectedFolderId.value) {
+      await setLastUsedFolderId(selectedFolderId.value);
+    }
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       try {

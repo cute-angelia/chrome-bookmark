@@ -5,7 +5,8 @@ import * as api from '../src/services/shioriApi.js';
 import * as library from '../src/services/bookmarkLibrary.js';
 import {
   getStoredBookmarks, getStoredFolders, saveStoredBookmarks, saveStoredFolders,
-  getLastBookmarkSyncTime, setLastBookmarkSyncTime, isSameDay, isBookmarkSyncNeeded
+  getLastBookmarkSyncTime, setLastBookmarkSyncTime, isSameDay, isBookmarkSyncNeeded,
+  getLastUsedFolderId, setLastUsedFolderId
 } from '../src/services/bookmarkStorage.js';
 import { INITIAL_BOOKMARKS, INITIAL_FOLDERS } from '../src/data/mockBookmarks.js';
 
@@ -177,6 +178,36 @@ test('cached multi-source bookmarks with remoteId or remote:... id stop paginati
   ]);
   assert.deepEqual(pages, [1]);
   assert.equal(result.complete, false);
+});
+
+test('fetchRemoteBookmarkUpdates uses total from API to paginate and returns total', async () => {
+  const pages = [];
+  globalThis.fetch = async (_url, options) => {
+    const page = JSON.parse(options.body).page;
+    pages.push(page);
+    return {
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          page,
+          total: 5,
+          limit: 2,
+          bookmarks: page === 1
+            ? [{ id: 1 }, { id: 2 }]
+            : page === 2
+              ? [{ id: 3 }, { id: 4 }]
+              : [{ id: 5 }]
+        }
+      })
+    };
+  };
+
+  const result = await api.fetchRemoteBookmarkUpdates({ server: 'https://server.test', token: 'secret' }, []);
+  assert.deepEqual(pages, [1, 2, 3]);
+  assert.equal(result.bookmarks.length, 5);
+  assert.equal(result.total, 5);
+  assert.equal(result.complete, true);
 });
 
 test('mergeLibraryBookmarks preserves tags and notes from stored popup bookmark when incoming chrome library has empty tags', () => {
@@ -441,4 +472,80 @@ test('fetchRemoteBookmarkByUrl queries remote using exact url keyword instead of
   assert.equal(body.page, 1);
   assert.equal(matched?.id, 999);
   assert.equal(matched?.title, 'Target Book');
+});
+
+test('extractDomainTag: extracts clean main domain tag without suffix', () => {
+  assert.equal(
+    library.extractDomainTag('https://github.com/anefzaoui/misterdownloadmanager'),
+    'github'
+  );
+  assert.equal(
+    library.extractDomainTag('https://www.github.com/anefzaoui/misterdownloadmanager'),
+    'github'
+  );
+  assert.equal(
+    library.extractDomainTag('https://bilibili.com/video/BV1xx'),
+    'bilibili'
+  );
+  assert.equal(
+    library.extractDomainTag('https://news.sina.com.cn/world'),
+    'sina'
+  );
+  assert.equal(
+    library.extractDomainTag('https://www.baidu.com.cn'),
+    'baidu'
+  );
+  assert.equal(
+    library.extractDomainTag('https://bbc.co.uk/news'),
+    'bbc'
+  );
+  assert.equal(
+    library.extractDomainTag('https://v2ex.com/t/12345'),
+    'v2ex'
+  );
+  assert.equal(
+    library.extractDomainTag('https://juejin.cn/post/1'),
+    'juejin'
+  );
+  assert.equal(
+    library.extractDomainTag('http://localhost:3000/app'),
+    'localhost'
+  );
+  assert.equal(
+    library.extractDomainTag('http://192.168.1.1/config'),
+    '192.168.1.1'
+  );
+  assert.equal(
+    library.extractDomainTag('chrome://extensions'),
+    ''
+  );
+  assert.equal(
+    library.extractDomainTag(''),
+    ''
+  );
+});
+
+test('getLastUsedFolderId and setLastUsedFolderId persist folder across IndexedDB and chrome.storage', async () => {
+  // 1. 默认无记忆时返回空字符串
+  assert.equal(await getLastUsedFolderId(), '');
+
+  // 2. 在纯 IndexedDB 环境下写入并读取
+  await setLastUsedFolderId('chrome:10');
+  assert.equal(await getLastUsedFolderId(), 'chrome:10');
+
+  // 3. 模拟 chrome.storage.local 环境
+  const store = {};
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: (keys, cb) => cb({ cutbookmark_last_used_folder_id: store.cutbookmark_last_used_folder_id }),
+        set: (data, cb) => { Object.assign(store, data); cb?.(); }
+      }
+    }
+  };
+
+  assert.equal(await getLastUsedFolderId(), '');
+  await setLastUsedFolderId('chrome:20');
+  assert.equal(store.cutbookmark_last_used_folder_id, 'chrome:20');
+  assert.equal(await getLastUsedFolderId(), 'chrome:20');
 });

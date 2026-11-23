@@ -1,4 +1,4 @@
-import { checkUrlBookmarked, setExtensionBookmarkIcon, clearGlobalBadge, refreshActiveTabIcon, saveToShioriFolder, removeFromShioriFolder } from './services/nativeBookmarkSync.js';
+import { checkUrlBookmarked, setExtensionBookmarkIcon, clearGlobalBadge, refreshActiveTabIcon, saveToShioriFolder, removeFromShioriFolder, recordBookmarkVisitIfMatched } from './services/nativeBookmarkSync.js';
 import { remoteAddBookmark, remoteDeleteBookmark, openRemoteLibraries } from './services/shioriApi.js';
 
 console.log('CutBookmark 2.0 Background Service Worker 初始化');
@@ -50,6 +50,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const latestTab = await chrome.tabs.get(tabId).catch(() => null);
     if (latestTab && latestTab.url === targetUrl) {
       setExtensionBookmarkIcon(isBookmarked, tabId);
+    }
+
+    // 页面加载完成且识别为书签时，记录访问（30分钟内防抖）
+    if (changeInfo.status === 'complete' && isBookmarked) {
+      await recordBookmarkVisitIfMatched(targetUrl);
     }
   } catch (e) {
     // 忽略异常

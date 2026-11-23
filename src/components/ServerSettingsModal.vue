@@ -24,7 +24,7 @@
       <!-- Segment Tabs -->
       <div class="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl text-xs font-semibold text-slate-600">
         <button
-          @click="activeTab = 'cloud'"
+          @click="selectTab('cloud')"
           class="py-1.5 rounded-xl transition cursor-pointer flex items-center justify-center space-x-1.5"
           :class="activeTab === 'cloud' ? 'bg-white text-indigo-700 shadow-2xs font-bold' : 'hover:text-slate-900'"
         >
@@ -32,7 +32,7 @@
           <span>官方云端 (Pro)</span>
         </button>
         <button
-          @click="activeTab = 'selfhosted'"
+          @click="selectTab('selfhosted')"
           class="py-1.5 rounded-xl transition cursor-pointer flex items-center justify-center space-x-1.5"
           :class="activeTab === 'selfhosted' ? 'bg-white text-indigo-700 shadow-2xs font-bold' : 'hover:text-slate-900'"
         >
@@ -257,6 +257,14 @@ const isLoggedIn = computed(() => {
   return !!config.value.token;
 });
 
+function selectTab(tab) {
+  activeTab.value = tab;
+  if (isChromeExtension()) {
+    chrome.storage.local.set({ cutbookmark_service_type: tab });
+  }
+  emit('status-change', { ...config.value, serviceType: tab });
+}
+
 async function loadConfig() {
   const c = await getServerConfig();
   config.value = c;
@@ -265,10 +273,17 @@ async function loadConfig() {
 
   // 检查是否已激活 License
   if (isChromeExtension()) {
-    chrome.storage.local.get(['cutbookmark_license_key', 'cutbookmark_is_pro'], (res) => {
+    chrome.storage.local.get(['cutbookmark_license_key', 'cutbookmark_is_pro', 'cutbookmark_service_type'], (res) => {
       if (res?.cutbookmark_is_pro || res?.cutbookmark_license_key) {
         isProLicensed.value = true;
         licenseKeyInput.value = res.cutbookmark_license_key || 'CB-LTD-PRO-USER';
+      }
+      if (res?.cutbookmark_service_type) {
+        activeTab.value = res.cutbookmark_service_type;
+      } else if (config.value.token || config.value.server) {
+        activeTab.value = 'selfhosted';
+      } else if (res?.cutbookmark_is_pro || res?.cutbookmark_license_key) {
+        activeTab.value = 'cloud';
       }
     });
   }
@@ -298,14 +313,19 @@ async function activateLicense() {
   if (isChromeExtension()) {
     chrome.storage.local.set({
       cutbookmark_license_key: key,
-      cutbookmark_is_pro: true
+      cutbookmark_is_pro: true,
+      cutbookmark_service_type: 'cloud'
     }, () => {
       isProLicensed.value = true;
+      activeTab.value = 'cloud';
       showToast('🎉 Pro 会员激活成功！已解锁全部云端特权');
+      emit('status-change', { ...config.value, isPro: true, serviceType: 'cloud' });
     });
   } else {
     isProLicensed.value = true;
+    activeTab.value = 'cloud';
     showToast('🎉 Pro 会员激活成功！');
+    emit('status-change', { ...config.value, isPro: true, serviceType: 'cloud' });
   }
 }
 
@@ -318,7 +338,10 @@ async function handleLogin() {
   try {
     const updated = await loginServer(form.value.server, form.value.username, form.value.password);
     config.value = updated;
-    emit('status-change', updated);
+    if (isChromeExtension()) {
+      chrome.storage.local.set({ cutbookmark_service_type: 'selfhosted' });
+    }
+    emit('status-change', { ...updated, serviceType: 'selfhosted' });
     showToast('自建服务连接成功！');
   } catch (err) {
     showToast(err.message || '连接失败，请检查服务地址与密码', 'error');
@@ -331,7 +354,7 @@ async function handleLogout() {
   const updated = await logoutServer();
   config.value = updated;
   form.value.password = '';
-  emit('status-change', updated);
+  emit('status-change', { ...updated, serviceType: 'selfhosted' });
   showToast('已退出自建服务');
 }
 

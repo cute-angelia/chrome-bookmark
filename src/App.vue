@@ -13,6 +13,15 @@
         <!-- Right Quick Actions -->
         <div class="flex items-center space-x-2 shrink-0">
           <button
+            @click="workspace?.openCreateModal()"
+            class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 shadow-sm shadow-indigo-200 transition cursor-pointer"
+            title="添加新书签"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            <span>添加书签</span>
+          </button>
+
+          <button
             @click="handleManualSync"
             :disabled="workspace?.isManualSyncing"
             class="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center space-x-1.5 shadow-2xs transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
@@ -25,10 +34,14 @@
           <button
             @click="workspace?.openServerSettings()"
             aria-label="远程服务设置"
-            class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100"
+            class="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center space-x-1.5 shadow-2xs transition cursor-pointer"
             title="远程服务设置"
           >
-            <span class="w-2.5 h-2.5 rounded-full" :class="connectionState === 'connected' ? 'bg-emerald-500 connection-breathe' : connectionState === 'connecting' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'" />
+            <span
+              class="w-2.5 h-2.5 rounded-full shrink-0"
+              :class="connectionState === 'connected' ? 'bg-emerald-500 connection-breathe' : connectionState === 'connecting' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'"
+            />
+            <span class="text-xs font-medium text-slate-700 select-none">{{ serviceLabel }}</span>
           </button>
         </div>
       </div>
@@ -36,22 +49,47 @@
 
     <!-- Main Workspace Container -->
     <main class="flex-1 min-h-0 w-full flex flex-col overflow-auto">
-      <WorkspaceView ref="workspace" @connection-state="connectionState = $event" />
+      <WorkspaceView ref="workspace" @connection-state="handleConnectionState" />
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { RotateCw } from 'lucide-vue-next';
+import { ref, computed, onMounted } from 'vue';
+import { RotateCw, Plus } from 'lucide-vue-next';
 import WorkspaceView from './views/WorkspaceView.vue';
+import { isChromeExtension } from './services/bookmarkStorage.js';
 
 const workspace = ref(null);
 const connectionState = ref('disconnected');
+const serviceType = ref('selfhosted');
+
+const serviceLabel = computed(() => {
+  return serviceType.value === 'cloud' ? '官方云端' : '自建';
+});
+
+function handleConnectionState(state, type) {
+  connectionState.value = state;
+  if (type) {
+    serviceType.value = type;
+  }
+}
 
 function handleManualSync() {
   workspace.value?.manualSyncRemote();
 }
+
+onMounted(() => {
+  if (isChromeExtension()) {
+    chrome.storage.local.get(['cutbookmark_service_type', 'cutbookmark_is_pro', 'cutbookmark_license_key'], (res) => {
+      if (res?.cutbookmark_service_type === 'cloud' || res?.cutbookmark_is_pro || res?.cutbookmark_license_key) {
+        serviceType.value = 'cloud';
+      } else {
+        serviceType.value = 'selfhosted';
+      }
+    });
+  }
+});
 </script>
 
 <style scoped>

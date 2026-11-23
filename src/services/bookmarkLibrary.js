@@ -4,6 +4,48 @@ export function domainOf(url) {
   try { return new URL(url).hostname; } catch { return ''; }
 }
 
+/**
+ * 从 URL 中提取不带后缀的主域名标签（如 https://github.com/xxx 提取为 'github'）
+ */
+export function extractDomainTag(url) {
+  if (!url || typeof url !== 'string') return '';
+  try {
+    const parsed = new URL(url.trim());
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return '';
+    }
+    const hostname = parsed.hostname.toLowerCase().trim();
+    if (!hostname) return '';
+
+    // IPv4 / IPv6
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.includes(':')) {
+      return hostname;
+    }
+    if (hostname === 'localhost') {
+      return 'localhost';
+    }
+
+    const parts = hostname.split('.');
+    if (parts.length <= 1) {
+      return parts[0] || '';
+    }
+
+    // 常见双重国别二级顶级域名（如 .com.cn, .co.uk, .org.cn, .edu.cn, .gov.cn, .net.cn, .com.hk, .co.jp, .com.tw）
+    const twoPartSuffixes = new Set(['com', 'co', 'net', 'org', 'edu', 'gov', 'ac']);
+    const secondLast = parts[parts.length - 2];
+    const last = parts[parts.length - 1];
+
+    let mainDomainIndex = parts.length - 2;
+    if (parts.length >= 3 && twoPartSuffixes.has(secondLast) && last.length === 2) {
+      mainDomainIndex = parts.length - 3;
+    }
+
+    return parts[mainDomainIndex] || '';
+  } catch {
+    return '';
+  }
+}
+
 export function normalizeBookmarkUrl(url) {
   if (!url || typeof url !== 'string') return '';
   try {
@@ -44,7 +86,7 @@ export async function readChromeLibrary() {
     if (node.id !== '0') {
       const id = `chrome:${node.id}`;
       folders.push({ id, name: node.title, path: [...path, node.title].join(' / '),
-        source: 'chrome', depth: ancestors.length, parentId: ancestors.at(-1) || '' });
+        source: 'chrome', depth: ancestors.length, parentId: ancestors.at(-1) || '', order: folders.length });
       ancestors = [...ancestors, id];
       path = [...path, node.title];
     }
@@ -145,6 +187,7 @@ export function aggregateBookmarksByUrl(bookmarks) {
 
     const bestNotes = items.map(b => b.notes).find(n => n && n.trim()) || '';
     const maxVisits = Math.max(...items.map(b => b.visits || 0), 0);
+    const latestLastVisited = Math.max(...items.map(b => b.lastVisited || 0), 0);
     const isPinned = items.some(b => b.pinned);
     const dateAdded = items.map(b => b.dateAdded).find(d => typeof d === 'number' && d > 0) || Date.now();
 
@@ -186,6 +229,7 @@ export function aggregateBookmarksByUrl(bookmarks) {
       notes: bestNotes,
       pinned: isPinned,
       visits: maxVisits,
+      lastVisited: latestLastVisited || undefined,
       dateAdded
     });
   }
@@ -217,7 +261,7 @@ export function mergeLibraryBookmarks(stored, incoming) {
     if (!old) return bookmark;
     // Source fields stay authoritative; workspace-only annotations survive refreshes.
     // For remote bookmarks with an upstream image, let incoming screenshot take precedence.
-    const preservedKeys = ['pinned', 'visits', 'notes', 'tags', ...(bookmark.source === 'remote' ? ['nativeId'] : ['screenshot']), 'nativeFolderId']
+    const preservedKeys = ['pinned', 'visits', 'lastVisited', 'notes', 'tags', ...(bookmark.source === 'remote' ? ['nativeId'] : ['screenshot']), ...(bookmark.source === 'chrome' ? [] : ['nativeFolderId'])]
       .filter(key => old[key] !== undefined && (old[key] !== '' || bookmark[key] === ''));
     if (bookmark.source === 'remote' && !bookmark.screenshot && old.screenshot) {
       preservedKeys.push('screenshot');
@@ -253,6 +297,10 @@ export function reconcileRecords(current, incoming) {
 export function mergeSourceFolders(current, incoming, source) {
   const result = [...current.filter(folder => folder.source !== source), ...incoming];
   // Source refresh completion order must not determine sidebar order; keep native tree order within its group.
-  result.sort((a, b) => sourceRank(a) - sourceRank(b));
+  result.sort((a, b) => {
+    const rankDiff = sourceRank(a) - sourceRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return (a.order ?? 0) - (b.order ?? 0);
+  });
   return reconcileRecords(current, result);
 }

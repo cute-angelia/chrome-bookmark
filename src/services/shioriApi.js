@@ -83,6 +83,7 @@ export async function fetchRemoteBookmarkUpdates(config, cached = []) {
   }
   const bookmarks = [];
   let maxPage = 1;
+  let serverTotal = null;
   for (let page = 1; page <= maxPage; page++) {
     const response = await fetch(`${server}/api/bookmarks`, {
       method: 'POST',
@@ -95,18 +96,35 @@ export async function fetchRemoteBookmarkUpdates(config, cached = []) {
     if (json.code !== 0) throw new Error(json.msg || 'Remote request failed');
     const data = json.data;
     if (!Array.isArray(data?.bookmarks)) throw new Error('Invalid bookmark response');
-    maxPage = Number(data.maxPage ?? 1);
+
+    // 检查接口是否提供了总数字段（如 data.total, data.totalCount, data.count, json.total）
+    const total = Number(data.total ?? data.totalCount ?? data.count ?? json.total ?? json.count);
+    if (!Number.isNaN(total) && total >= 0) {
+      serverTotal = total;
+    }
+
+    const pageSize = Number(data.limit ?? data.pageSize ?? data.perPage ?? data.per_page ?? data.bookmarks.length ?? 20) || 20;
+
+    if (data.maxPage != null || data.totalPages != null || data.totalPage != null || data.total_pages != null) {
+      maxPage = Number(data.maxPage ?? data.totalPages ?? data.totalPage ?? data.total_pages ?? 1);
+    } else if (serverTotal != null && serverTotal > 0) {
+      maxPage = Math.ceil(serverTotal / pageSize);
+    } else {
+      maxPage = 1;
+    }
+
     if (!Number.isInteger(maxPage) || maxPage < 0 || (data.page != null && Number(data.page) !== page)) {
       throw new Error('Invalid bookmark pagination');
     }
     bookmarks.push(...data.bookmarks);
-    if (page >= maxPage) return { bookmarks, complete: true };
-    // A fully known page is the boundary of the already cached history.
-    if (data.bookmarks.every(bookmark => bookmark.id != null && knownIds.has(String(bookmark.id)))) {
-      return { bookmarks, complete: false };
+    if (page >= maxPage) return { bookmarks, complete: true, total: serverTotal };
+    // 只有在已缓存数量不小于服务端总数时，遇到全已知页面才可提前跳出；否则继续翻页拉取未缓存的后续书签
+    const isCacheComplete = serverTotal == null || cached.length >= serverTotal;
+    if (isCacheComplete && data.bookmarks.every(bookmark => bookmark.id != null && knownIds.has(String(bookmark.id)))) {
+      return { bookmarks, complete: false, total: serverTotal };
     }
   }
-  return { bookmarks, complete: true };
+  return { bookmarks, complete: true, total: serverTotal };
 }
 
 /**

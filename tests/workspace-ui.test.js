@@ -62,8 +62,8 @@ test('workspace fills the viewport, combines sources, filters hierarchy and upda
     assert.equal(rootBounds.y, headerBounds.height);
     assert.equal(rootBounds.height + rootBounds.y, 900);
     const lamp = page.getByRole('button', { name: '远程服务设置' });
-    assert.equal(await lamp.innerText(), '');
-    assert.equal(await lamp.getAttribute('title'), null);
+    assert.equal(await lamp.innerText(), '自建');
+    assert.equal(await lamp.getAttribute('title'), '远程服务设置');
     assert.match(await lamp.locator('span').getAttribute('class'), /connection-breathe/);
     const initialSidebar = await page.locator('aside').innerText();
     const treeCalls = await page.evaluate(() => window.getTreeCalls);

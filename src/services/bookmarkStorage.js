@@ -36,6 +36,8 @@ export async function updateStoredBookmark(bookmark) {
         dup.tags = Array.isArray(bookmark.tags) ? [...bookmark.tags] : [];
         if (bookmark.notes !== undefined) dup.notes = bookmark.notes;
         if (bookmark.pinned !== undefined) dup.pinned = bookmark.pinned;
+        if (bookmark.visits !== undefined) dup.visits = bookmark.visits;
+        if (bookmark.lastVisited !== undefined) dup.lastVisited = bookmark.lastVisited;
         await updateIndexedRecord('bookmarks', dup);
       }
     } catch (e) {
@@ -53,20 +55,34 @@ export async function deleteStoredBookmark(id) {
 }
 
 /**
- * 读取文件夹列表
+ * 读取文件夹列表（严格保留保存时的顺序，防止 IndexedDB 按主键字典序导致顺序错乱）
  */
 export async function getStoredFolders() {
-  return readIndexedRecords('folders');
+  const list = await readIndexedRecords('folders');
+  return list
+    .sort((a, b) => (a.__order ?? a.order ?? 0) - (b.__order ?? b.order ?? 0))
+    .map(f => {
+      if ('__order' in f) {
+        const { __order, ...rest } = f;
+        return rest;
+      }
+      return f;
+    });
 }
 
 /**
- * 保存文件夹列表
+ * 保存文件夹列表（注入内部顺序索引 __order，确保跨会话持久化次序一致且不污染数据）
  */
 export async function saveStoredFolders(folders) {
-  return writeIndexedRecords('folders', folders);
+  const ordered = (folders || []).map((f, i) => ({
+    ...f,
+    __order: f.order ?? i
+  }));
+  return writeIndexedRecords('folders', ordered);
 }
 
 const SYNC_META_KEY = 'cutbookmark_last_sync_time';
+const LAST_USED_FOLDER_KEY = 'cutbookmark_last_used_folder_id';
 
 /**
  * 判断两个时间戳是否为同一自然天
@@ -129,6 +145,49 @@ export async function setLastBookmarkSyncTime(time = Date.now()) {
     console.warn('Could not save last sync time:', error);
   }
   return time;
+}
+
+/**
+ * 获取上次使用的书签文件夹 ID
+ */
+export async function getLastUsedFolderId() {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([LAST_USED_FOLDER_KEY], (res) => {
+        resolve(res?.[LAST_USED_FOLDER_KEY] || '');
+      });
+    });
+  }
+  try {
+    const settings = await readIndexedRecords('settings');
+    const record = settings.find(r => r.id === LAST_USED_FOLDER_KEY);
+    return record?.value || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 记录上次使用的书签文件夹 ID
+ */
+export async function setLastUsedFolderId(folderId) {
+  if (!folderId) return '';
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [LAST_USED_FOLDER_KEY]: folderId }, () => {
+        resolve(folderId);
+      });
+    });
+  }
+  try {
+    const settings = await readIndexedRecords('settings');
+    const filtered = settings.filter(r => r.id !== LAST_USED_FOLDER_KEY);
+    filtered.push({ id: LAST_USED_FOLDER_KEY, value: folderId });
+    await writeIndexedRecords('settings', filtered);
+  } catch (error) {
+    console.warn('Could not save last used folder id:', error);
+  }
+  return folderId;
 }
 
 /**

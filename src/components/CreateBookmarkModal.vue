@@ -44,6 +44,7 @@
             <label class="block font-semibold text-slate-700 mb-1">文件夹</label>
             <select
               v-model="form.folder"
+              @change="onFolderChange"
               class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
               <option v-for="f in availableFolders" :key="f.id" :value="f.name">
@@ -117,7 +118,8 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { Plus, X } from 'lucide-vue-next';
-import { showToast } from '../services/bookmarkStorage.js';
+import { showToast, getLastUsedFolderId, setLastUsedFolderId } from '../services/bookmarkStorage.js';
+import { extractDomainTag } from '../services/bookmarkLibrary.js';
 
 const props = defineProps({
   visible: Boolean,
@@ -142,12 +144,26 @@ const form = ref({
 
 const availableFolders = ref([]);
 
-watch(() => props.folders, (newVal) => {
-  availableFolders.value = newVal.filter(f => f.id !== 'all');
-  if (availableFolders.value.length && !form.value.folder) {
-    form.value.folder = availableFolders.value[0].name;
+watch(() => [props.visible, props.folders], async ([visible, folders]) => {
+  if (visible) {
+    availableFolders.value = (folders || []).filter(f => f.id !== 'all');
+    const lastFolderId = await getLastUsedFolderId();
+    const matched = availableFolders.value.find(f => f.id === lastFolderId);
+    if (matched) {
+      form.value.folder = matched.name;
+    } else if (availableFolders.value.length) {
+      const defaultBar = availableFolders.value.find(f => f.id === 'chrome:1' || f.name === '书签栏');
+      form.value.folder = defaultBar ? defaultBar.name : availableFolders.value[0].name;
+    }
   }
 }, { immediate: true });
+
+function onFolderChange() {
+  const selected = availableFolders.value.find(f => f.name === form.value.folder);
+  if (selected?.id) {
+    setLastUsedFolderId(selected.id).catch(() => {});
+  }
+}
 
 function handleUrlBlur() {
   if (form.value.url && !form.value.title) {
@@ -156,6 +172,12 @@ function handleUrlBlur() {
       form.value.title = u.hostname;
     } catch (e) {
       // ignore
+    }
+  }
+  if (form.value.url && form.value.tags.length === 0) {
+    const domainTag = extractDomainTag(form.value.url);
+    if (domainTag && !form.value.tags.includes(domainTag)) {
+      form.value.tags.push(domainTag);
     }
   }
 }
@@ -204,6 +226,11 @@ function submit() {
     pinned: form.value.pinned,
     visits: 1
   };
+
+  const selectedFolderObj = availableFolders.value.find(f => f.name === form.value.folder);
+  if (selectedFolderObj?.id) {
+    setLastUsedFolderId(selectedFolderObj.id).catch(() => {});
+  }
 
   emit('create', newBm);
   showToast('书签已成功添加！');
