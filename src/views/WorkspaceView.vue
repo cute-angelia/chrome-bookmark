@@ -348,7 +348,23 @@
       </div>
 
       <!-- 可滚动书签列表项 -->
-      <div class="flex-1 overflow-y-auto p-3 space-y-2">
+      <div
+        ref="bookmarkListRef"
+        class="flex-1 overflow-y-auto p-3 space-y-2 relative select-none"
+        @mousedown="handleListMouseDown"
+      >
+        <!-- 矩形拉取选框 (Marquee Box) -->
+        <div
+          v-if="marqueeBox && isSelecting"
+          class="absolute border border-indigo-500 bg-indigo-500/15 rounded-xl pointer-events-none z-30 transition-none shadow-sm"
+          :style="{
+            left: `${marqueeBox.left}px`,
+            top: `${marqueeBox.top}px`,
+            width: `${marqueeBox.width}px`,
+            height: `${marqueeBox.height}px`
+          }"
+        />
+
         <div
           v-for="bm in filteredList"
           :key="bm.id"
@@ -356,11 +372,15 @@
           draggable="true"
           @dragstart="handleBookmarkDragStart($event, bm)"
           @dragend="handleBookmarkDragEnd"
-          @click="selectBookmark(bm.id)"
+          @click="selectBookmark(bm.id, $event)"
           class="p-2.5 rounded-2xl border transition cursor-pointer flex gap-3 group relative select-none"
           :class="[
-            selectedBookmarkId === bm.id ? 'bg-indigo-50/80 border-indigo-300 shadow-xs' : 'bg-white border-slate-200/80 hover:border-slate-300',
-            draggedBookmarkId === bm.id ? 'opacity-40 scale-95 border-dashed border-indigo-400' : ''
+            selectedBatchIds.includes(bm.id)
+              ? 'bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-400/50 shadow-xs'
+              : selectedBookmarkId === bm.id
+                ? 'bg-indigo-50/60 border-indigo-300 shadow-xs'
+                : 'bg-white border-slate-200/80 hover:border-slate-300',
+            draggedBookmarkIds.includes(bm.id) ? 'opacity-40 scale-[0.98] border-dashed border-indigo-400 bg-indigo-50/50' : ''
           ]"
         >
           <!-- 批量选择框 -->
@@ -781,9 +801,14 @@ const isBatchMode = ref(false);
 const selectedBatchIds = ref([]);
 
 const draggedBookmarkId = ref(null);
+const draggedBookmarkIds = ref([]);
 const dragOverFolderId = ref(null);
 const draggedFolderId = ref(null);
 const dragOverFolderSortTarget = ref(null);
+
+const bookmarkListRef = ref(null);
+const marqueeBox = ref(null);
+const isSelecting = ref(false);
 
 const selectedBookmarkId = ref(null);
 const newTagInput = ref('');
@@ -884,6 +909,9 @@ const activeBookmark = computed(() => {
   if (isCurrentInTrash.value) {
     return trashBookmarks.value.find(b => b.id === selectedBookmarkId.value) || trashBookmarks.value[0];
   }
+  if (selectedFolderFilter.value || selectedTagFilter.value || searchQuery.value.trim() || activeView.value !== 'all') {
+    return filteredList.value.find(b => b.id === selectedBookmarkId.value) || filteredList.value[0];
+  }
   return bookmarks.value.find(b => b.id === selectedBookmarkId.value) || bookmarks.value[0];
 });
 
@@ -903,8 +931,9 @@ function isInFolder(bookmark, folder) {
     return bookmark.folderId === folder.id || bookmark.remoteFolderId === folder.id ||
       (bookmark.isRemote && (!bookmark.server || folder.id === `remote:${bookmark.server}`));
   }
-  return bookmark.folderId === folder.id || bookmark.ancestorIds?.includes(folder.id) ||
-    (!folder.source && bookmark.folder === folder.name);
+  // 仅匹配直属于该文件夹的书签，排除子文件夹内的书签
+  return bookmark.folderId === folder.id || bookmark.nativeFolderId === folder.id ||
+    (!folder.source && !bookmark.folderId && bookmark.folder === folder.name);
 }
 
 const folderCounts = computed(() => {
@@ -954,6 +983,15 @@ function selectFolder(folderId) {
     selectedTagFilter.value = '';
     expandFolderAncestors(folderId);
   }
+  nextTick(() => {
+    if (filteredList.value.length > 0) {
+      if (!filteredList.value.some(b => b.id === selectedBookmarkId.value)) {
+        selectedBookmarkId.value = filteredList.value[0].id;
+      }
+    } else {
+      selectedBookmarkId.value = null;
+    }
+  });
 }
 
 function toggleTagFilter(tag) {
@@ -1044,8 +1082,168 @@ const filteredList = computed(() => {
   return list;
 });
 
-function selectBookmark(id) {
+let lastSelectedBmIndex = -1;
+
+function selectBookmark(id, event) {
   selectedBookmarkId.value = id;
+  const currentIndex = filteredList.value.findIndex(b => b.id === id);
+
+  // 1. Shift 范围连选
+  if (event?.shiftKey && lastSelectedBmIndex !== -1 && currentIndex !== -1) {
+    const start = Math.min(lastSelectedBmIndex, currentIndex);
+    const end = Math.max(lastSelectedBmIndex, currentIndex);
+    const rangeIds = filteredList.value.slice(start, end + 1).map(b => b.id);
+    const merged = new Set([...selectedBatchIds.value, ...rangeIds]);
+    selectedBatchIds.value = Array.from(merged);
+    isBatchMode.value = true;
+    return;
+  }
+
+  // 2. Ctrl / Cmd 单项加选或反选
+  if (event?.ctrlKey || event?.metaKey) {
+    if (selectedBatchIds.value.includes(id)) {
+      selectedBatchIds.value = selectedBatchIds.value.filter(i => i !== id);
+    } else {
+      selectedBatchIds.value = [...selectedBatchIds.value, id];
+    }
+    if (selectedBatchIds.value.length > 0) {
+      isBatchMode.value = true;
+    }
+    lastSelectedBmIndex = currentIndex;
+    return;
+  }
+
+  // 3. 处于批量模式时，点击卡片直接切换选中
+  if (isBatchMode.value) {
+    if (selectedBatchIds.value.includes(id)) {
+      selectedBatchIds.value = selectedBatchIds.value.filter(i => i !== id);
+    } else {
+      selectedBatchIds.value = [...selectedBatchIds.value, id];
+    }
+    lastSelectedBmIndex = currentIndex;
+    return;
+  }
+
+  lastSelectedBmIndex = currentIndex;
+}
+
+function handleListMouseDown(event) {
+  if (event.button !== 0) return;
+  // 排除按钮、链接、输入框等交互元素
+  if (event.target.closest('button, a, input, select, textarea, [role="button"]')) {
+    return;
+  }
+
+  const clickedCard = event.target.closest('[data-bookmark-id]');
+  // 若按住 Shift，或者点击在卡片外部空白处，触发拉框多选
+  if (!clickedCard || event.shiftKey) {
+    if (event.shiftKey) event.preventDefault();
+    startMarqueeSelection(event);
+  }
+}
+
+function startMarqueeSelection(event) {
+  const container = bookmarkListRef.value;
+  if (!container) return;
+
+  const rect = container.getBoundingClientRect();
+  const startClientX = event.clientX;
+  const startClientY = event.clientY;
+
+  const marqueeInitialSelected = event.shiftKey || event.metaKey || event.ctrlKey
+    ? new Set(selectedBatchIds.value)
+    : new Set();
+
+  let hasMoved = false;
+
+  function onMouseMove(e) {
+    const deltaX = e.clientX - startClientX;
+    const deltaY = e.clientY - startClientY;
+
+    if (!hasMoved && Math.hypot(deltaX, deltaY) > 4) {
+      hasMoved = true;
+      isSelecting.value = true;
+      if (!isBatchMode.value) {
+        isBatchMode.value = true;
+      }
+    }
+
+    if (!hasMoved) return;
+
+    // 视口坐标用于碰撞检测
+    const boxVpLeft = Math.min(startClientX, e.clientX);
+    const boxVpRight = Math.max(startClientX, e.clientX);
+    const boxVpTop = Math.min(startClientY, e.clientY);
+    const boxVpBottom = Math.max(startClientY, e.clientY);
+
+    // 容器内坐标用于选框渲染
+    const cLeft = rect.left;
+    const cTop = rect.top;
+    const cRight = rect.right;
+    const cBottom = rect.bottom;
+
+    const renderLeft = Math.max(boxVpLeft, cLeft) - cLeft + container.scrollLeft;
+    const renderTop = Math.max(boxVpTop, cTop) - cTop + container.scrollTop;
+    const renderWidth = Math.max(0, Math.min(boxVpRight, cRight) - Math.max(boxVpLeft, cLeft));
+    const renderHeight = Math.max(0, Math.min(boxVpBottom, cBottom) - Math.max(boxVpTop, cTop));
+
+    marqueeBox.value = {
+      left: renderLeft,
+      top: renderTop,
+      width: renderWidth,
+      height: renderHeight
+    };
+
+    // 碰撞检测
+    const cards = container.querySelectorAll('[data-bookmark-id]');
+    const newSelected = new Set(marqueeInitialSelected);
+
+    cards.forEach(card => {
+      const cr = card.getBoundingClientRect();
+      const id = card.getAttribute('data-bookmark-id');
+      if (!id) return;
+
+      const isIntersecting = !(
+        cr.right < boxVpLeft ||
+        cr.left > boxVpRight ||
+        cr.bottom < boxVpTop ||
+        cr.top > boxVpBottom
+      );
+
+      if (isIntersecting) {
+        newSelected.add(id);
+      } else if (!marqueeInitialSelected.has(id)) {
+        newSelected.delete(id);
+      }
+    });
+
+    selectedBatchIds.value = Array.from(newSelected);
+  }
+
+  function onMouseUp(e) {
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+
+    isSelecting.value = false;
+    marqueeBox.value = null;
+
+    if (!hasMoved) {
+      // 纯点击空白处：清空选择
+      if (!event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        selectedBatchIds.value = [];
+        if (isBatchMode.value) {
+          isBatchMode.value = false;
+        }
+      }
+    } else {
+      if (selectedBatchIds.value.length > 0) {
+        isBatchMode.value = true;
+      }
+    }
+  }
+
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
 }
 
 let pendingTargetUrl = '';
@@ -1275,42 +1473,71 @@ async function selectNativeMatch(bookmark) {
   return matches.find(match => match.id === result.value);
 }
 
-async function moveBookmarkToFolder(bookmark, folder) {
-  if (!bookmark || !folder || movingBookmark.value) return;
+async function moveBookmarksBatchToFolder(bookmarksList, folder) {
+  if (!bookmarksList || bookmarksList.length === 0 || !folder || movingBookmark.value) return;
   movingBookmark.value = true;
   try {
-    if (folder.source === 'chrome') {
-      const native = await selectNativeMatch(bookmark);
-      const moved = await moveNativeBookmark(native, folder, bookmark);
-      await refreshChrome(true);
-      const current = bookmarks.value.find(item => item.id === bookmark.id);
-      if (current) {
-        current.nativeId = moved.id;
-        current.nativeFolderId = folder.id;
-        if (!current.source) {
-          current.folderId = folder.id;
-          current.folder = folder.path || folder.name;
-          current.ancestorIds = [];
-          let ancestor = folder;
-          while (ancestor) {
-            current.ancestorIds.unshift(ancestor.id);
-            ancestor = nativeFolders.value.find(item => item.id === ancestor.parentId);
+    if (folder.source === 'chrome' && isExtEnv.value) {
+      const parentId = folder.id.replace(/^chrome:/, '');
+      for (const bm of bookmarksList) {
+        try {
+          let native = null;
+          if (bm.nativeId) {
+            try {
+              const [node] = await chrome.bookmarks.get(bm.nativeId);
+              if (node) native = node;
+            } catch (_) {}
           }
+          if (!native && bm.url) {
+            const matches = await chrome.bookmarks.search({ url: bm.url });
+            native = matches[0] || null;
+          }
+
+          let moved;
+          if (native) {
+            moved = await chrome.bookmarks.move(native.id, { parentId });
+          } else {
+            moved = await chrome.bookmarks.create({ parentId, title: bm.title, url: bm.url });
+          }
+
+          const current = bookmarks.value.find(item => item.id === bm.id);
+          if (current) {
+            current.nativeId = moved.id;
+            current.nativeFolderId = folder.id;
+            if (!current.source) {
+              current.folderId = folder.id;
+              current.folder = folder.path || folder.name;
+              current.ancestorIds = [];
+              let ancestor = folder;
+              while (ancestor) {
+                current.ancestorIds.unshift(ancestor.id);
+                ancestor = nativeFolders.value.find(item => item.id === ancestor.parentId);
+              }
+            }
+          }
+        } catch (itemErr) {
+          console.warn('Move bookmark item failed:', bm.title, itemErr);
         }
-        await persistBookmark(current);
       }
-      showToast(`已移动到「${folder.name}」`);
+      await refreshChrome(true);
+      await persistChanges();
     } else {
       // 纯本地/自定义文件夹
-      const current = bookmarks.value.find(item => item.id === bookmark.id);
-      if (current) {
-        current.folderId = folder.id;
-        current.folder = folder.name;
-        current.ancestorIds = [folder.id];
-        await persistBookmark(current);
-        showToast(`已移动到「${folder.name}」`);
+      for (const bm of bookmarksList) {
+        const current = bookmarks.value.find(item => item.id === bm.id);
+        if (current) {
+          current.folderId = folder.id;
+          current.folder = folder.name;
+          current.ancestorIds = [folder.id];
+        }
       }
+      await persistChanges();
     }
+
+    const count = bookmarksList.length;
+    showToast(count === 1 ? `已移动到「${folder.name}」` : `成功将 ${count} 个书签移动到「${folder.name}」`);
+    selectedBatchIds.value = [];
+    isBatchMode.value = false;
   } catch (error) {
     if (error.message !== '已取消操作') {
       showToast(error.message || '移动失败', 'error');
@@ -1318,6 +1545,10 @@ async function moveBookmarkToFolder(bookmark, folder) {
   } finally {
     movingBookmark.value = false;
   }
+}
+
+async function moveBookmarkToFolder(bookmark, folder) {
+  return moveBookmarksBatchToFolder([bookmark], folder);
 }
 
 async function moveActiveToFolder(event) {
@@ -1333,13 +1564,48 @@ async function moveActiveToFolder(event) {
 }
 
 function handleBookmarkDragStart(event, bm) {
+  let idsToDrag = [];
+  if (selectedBatchIds.value.includes(bm.id)) {
+    idsToDrag = [...selectedBatchIds.value];
+  } else {
+    idsToDrag = [bm.id];
+    selectedBatchIds.value = [bm.id];
+  }
+
+  draggedBookmarkIds.value = idsToDrag;
   draggedBookmarkId.value = bm.id;
+
   event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', bm.id);
+  event.dataTransfer.setData('text/plain', JSON.stringify(idsToDrag));
+
+  if (idsToDrag.length > 1) {
+    const badge = document.createElement('div');
+    badge.style.position = 'fixed';
+    badge.style.top = '-9999px';
+    badge.style.left = '-9999px';
+    badge.style.padding = '6px 14px';
+    badge.style.background = '#4f46e5';
+    badge.style.color = '#ffffff';
+    badge.style.fontSize = '12px';
+    badge.style.fontWeight = '600';
+    badge.style.borderRadius = '9999px';
+    badge.style.boxShadow = '0 10px 15px -3px rgba(79, 70, 229, 0.3)';
+    badge.style.display = 'flex';
+    badge.style.alignItems = 'center';
+    badge.style.gap = '6px';
+    badge.style.zIndex = '99999';
+    badge.innerHTML = `<span>📑</span><span>移动 ${idsToDrag.length} 个书签</span>`;
+    document.body.appendChild(badge);
+    event.dataTransfer.setDragImage(badge, badge.offsetWidth / 2, badge.offsetHeight / 2);
+    setTimeout(() => {
+      if (badge.parentNode) badge.parentNode.removeChild(badge);
+    }, 0);
+  }
 }
 
 function handleBookmarkDragEnd() {
   draggedBookmarkId.value = null;
+  draggedBookmarkIds.value = [];
   dragOverFolderId.value = null;
 }
 
@@ -1476,7 +1742,7 @@ function handleFolderDragOver(event, folder) {
     const position = relY < rect.height / 2 ? 'before' : 'after';
     dragOverFolderSortTarget.value = { id: folder.id, position };
     dragOverFolderId.value = null;
-  } else if (draggedBookmarkId.value) {
+  } else if (draggedBookmarkId.value || draggedBookmarkIds.value.length > 0) {
     // 正在拖拽书签移入文件夹
     event.dataTransfer.dropEffect = 'move';
     dragOverFolderId.value = folder.id;
@@ -1494,23 +1760,36 @@ function handleFolderDragLeave(event, folder) {
 }
 
 async function handleFolderDrop(event, folder) {
-  // 分流 1：如果拖入的是书签
-  if (draggedBookmarkId.value) {
-    const bmId = event.dataTransfer.getData('text/plain') || draggedBookmarkId.value;
+  // 分流 1：如果拖入的是书签（单项或批量）
+  if (draggedBookmarkId.value || draggedBookmarkIds.value.length > 0) {
+    let ids = [];
+    try {
+      const dataStr = event.dataTransfer.getData('text/plain');
+      if (dataStr && dataStr.startsWith('[') && dataStr.endsWith(']')) {
+        ids = JSON.parse(dataStr);
+      }
+    } catch (_) {}
+    if (!ids || ids.length === 0) {
+      ids = draggedBookmarkIds.value.length > 0
+        ? [...draggedBookmarkIds.value]
+        : (draggedBookmarkId.value ? [draggedBookmarkId.value] : []);
+    }
+
     dragOverFolderId.value = null;
     draggedBookmarkId.value = null;
-    if (!bmId) return;
+    draggedBookmarkIds.value = [];
 
-    const bookmark = bookmarks.value.find(b => b.id === bmId);
-    if (!bookmark) return;
+    const targetBookmarks = bookmarks.value.filter(b => ids.includes(b.id));
+    if (targetBookmarks.length === 0) return;
 
-    // 如果已经在该文件夹中，无需重复移动
-    if (isInFolder(bookmark, folder)) {
-      showToast(`书签已在「${folder.name}」中`, 'info');
+    // 过滤掉原本已经在目标文件夹中的书签
+    const toMove = targetBookmarks.filter(b => !isInFolder(b, folder));
+    if (toMove.length === 0) {
+      showToast(targetBookmarks.length === 1 ? `书签已在「${folder.name}」中` : `所选 ${targetBookmarks.length} 个书签均已在「${folder.name}」中`, 'info');
       return;
     }
 
-    await moveBookmarkToFolder(bookmark, folder);
+    await moveBookmarksBatchToFolder(toMove, folder);
     return;
   }
 
@@ -1918,8 +2197,15 @@ async function deleteFolderAction(folder) {
       });
       scheduleChromeRefresh();
     } else {
-      // 1. 删除该文件夹及其下的书签
-      const insideBmIds = new Set(bookmarks.value.filter(b => isInFolder(b, folder)).map(b => b.id));
+      // 1. 删除该文件夹及其子树下的书签
+      const subtreeIds = new Set(getFolderSubtree(folder.id).ids);
+      const insideBmIds = new Set(bookmarks.value.filter(b => {
+        if (isInFolder(b, folder)) return true;
+        if (b.folderId && subtreeIds.has(b.folderId)) return true;
+        if (b.nativeFolderId && subtreeIds.has(b.nativeFolderId)) return true;
+        if (b.ancestorIds?.some(id => subtreeIds.has(id))) return true;
+        return false;
+      }).map(b => b.id));
       for (const bm of bookmarks.value) {
         if (insideBmIds.has(bm.id) && bm.source === 'remote') {
           try { await remoteDeleteBookmark(bm.remoteId); } catch (_) {}
@@ -2039,13 +2325,16 @@ function scheduleChromeRefresh() {
   chromeRefreshTimer = setTimeout(() => refreshChrome(true), 150);
 }
 
+let lastChromeDiffTime = 0;
+const CHROME_DIFF_THROTTLE_MS = 2000;
+
 async function refreshChrome(force = false) {
   if (!isChromeExtension()) return;
-  const hasChromeBookmarks = bookmarks.value.some(b => b.source === 'chrome');
-  const lastSync = await getLastBookmarkSyncTime();
-  if (!force && !isBookmarkSyncNeeded(lastSync, hasChromeBookmarks)) {
+  const now = Date.now();
+  if (!force && (now - lastChromeDiffTime < CHROME_DIFF_THROTTLE_MS)) {
     return;
   }
+  lastChromeDiffTime = now;
 
   const generation = ++chromeGeneration;
   try {
@@ -2059,14 +2348,29 @@ async function refreshChrome(force = false) {
     const merged = mergeLibraryBookmarks(baseStored, [
       ...baseStored.filter(b => b.source === 'remote' || b.isRemote), ...library.bookmarks
     ]);
-    bookmarks.value = reconcileRecords(bookmarks.value, aggregateBookmarksByUrl(merged));
-    folders.value = mergeSourceFolders(folders.value, library.folders, 'chrome');
-    try {
-      await persistChanges();
-      await saveStoredFolders(folders.value);
-      await setLastBookmarkSyncTime(Date.now());
-    } catch (e) {
-      console.warn('Chrome bookmarks could not be cached:', e);
+    const aggregated = aggregateBookmarksByUrl(merged);
+    const reconciled = reconcileRecords(bookmarks.value, aggregated);
+
+    const bookmarksChanged = reconciled !== bookmarks.value;
+    const mergedFolders = mergeSourceFolders(folders.value, library.folders, 'chrome');
+    const foldersChanged = JSON.stringify(mergedFolders) !== JSON.stringify(folders.value);
+
+    // 仅在真实检测到本地变动或强制同步时才执行视图更新与磁盘写入，达成静默无感对齐
+    if (bookmarksChanged || foldersChanged || force) {
+      bookmarks.value = reconciled;
+      folders.value = mergedFolders;
+      try {
+        if (bookmarksChanged || force) await persistChanges();
+        if (foldersChanged || force) await saveStoredFolders(folders.value);
+        await setLastBookmarkSyncTime(Date.now());
+      } catch (e) {
+        console.warn('Chrome bookmarks could not be cached:', e);
+      }
+
+      if (pendingTargetUrl) {
+        const matched = await focusBookmarkByUrl(pendingTargetUrl);
+        if (matched) pendingTargetUrl = '';
+      }
     }
   } catch (error) {
     console.warn('Chrome bookmarks could not be loaded:', error);
@@ -2228,12 +2532,9 @@ onMounted(async () => {
   window.addEventListener('click', closeFolderContextMenu);
   window.addEventListener('scroll', closeFolderContextMenu, true);
   window.addEventListener('keydown', onGlobalKeyDown);
-  // 初次加载对齐一次（非交互触发）
-  await Promise.all([refreshChrome(false), refreshRemote()]);
-  if (pendingTargetUrl) {
-    const matched = await focusBookmarkByUrl(pendingTargetUrl);
-    if (matched) pendingTargetUrl = '';
-  }
+  // 初次加载：首屏本地缓存已就地展现，后台非阻塞静默对比 Chrome 原生书签与远程服务
+  refreshChrome(false);
+  refreshRemote();
 });
 
 onUnmounted(() => {

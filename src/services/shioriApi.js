@@ -5,7 +5,7 @@ import { normalizeBookmarkUrl } from './bookmarkLibrary.js';
 const CONFIG_KEY = 'cutbookmark_shiori_config_v2';
 
 export const DEFAULT_SERVER_CONFIG = {
-  server: 'http://192.168.3.36:38112',
+  server: '',
   username: '',
   token: '',
   remember: true
@@ -240,7 +240,7 @@ export async function remoteDeleteBookmark(url) {
  */
 export async function openRemoteLibraries() {
   const config = await getServerConfig();
-  const targetUrl = config.server || 'http://192.168.3.36:38112';
+  const targetUrl = config.server || 'https://cutbookmark.com';
   if (isChromeExtension() && chrome.tabs && chrome.tabs.create) {
     chrome.tabs.create({ url: targetUrl });
   } else {
